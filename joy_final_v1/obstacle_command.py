@@ -2,7 +2,6 @@
 import sys
 import rospy
 import moveit_commander
-from cw3_helper.srv import ChangeCollisionObject
 import tf2_ros
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from math import pi, atan2, cos, sin, tan, sqrt
@@ -82,7 +81,7 @@ class Scene_obstacle(object):
         return co
 
     # Add a line obstacle between two points (only concern about same height)
-    def printing_visualize(self, start_point, end_point):
+    def printing_visualize(self, start_point, end_point, name = 'obstacle'):
         # print(start_point)
         rospy.sleep(0.05)
         box_pose = geometry_msgs.msg.PoseStamped()
@@ -110,7 +109,7 @@ class Scene_obstacle(object):
 
 
         self._printing_number += 1
-        box_name = 'printing_point' + str(self._printing_number)
+        box_name = name + str(self._printing_number)
         self.pub_co.publish(self.make_box(box_name, box_pose, size=(length, 0.01, 0.01)))
 
         rospy.sleep(0.05)

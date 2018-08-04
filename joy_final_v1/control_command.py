@@ -20,6 +20,7 @@ from sensor_msgs.msg import JointState
 import numpy as np
 from actionlib_msgs.msg import GoalStatusArray
 import moveit_python
+from obstacle_command import Scene_obstacle
 
 class arm_base_control:
     def __init__(self):
@@ -28,17 +29,17 @@ class arm_base_control:
 
         self.robot = moveit_commander.RobotCommander()
 
+        # Init moveit group
         self.group = moveit_commander.MoveGroupCommander('robot')
-
-        self.base_group = moveit_commander.MoveGroupCommander('robot')
-
         self.arm_group = moveit_commander.MoveGroupCommander('arm')
+
+        self.scene = Scene_obstacle()
 
         self.msg_print = SetBoolRequest()
 
         self.request_fk = rospy.ServiceProxy('/compute_fk', GetPositionFK)
 
-        self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=10)
+        self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=100)
 
         sub_waypoint_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.waypoint_execution_cb)
         
@@ -59,69 +60,11 @@ class arm_base_control:
         msg_extrude = 5.0
         extruder_publisher.publish(msg_extrude)
 
-        self.printing_number = 0
-        self.further_printing_number = 0
-
-        # self.add_three_box_obstacle()
-        point_list = []
-
-        # for i in range(11):
-        #     point_list.append((i * 0.2 -1, 3, 0.1))
-        # print(point_list)
-
-        point_list = self.straight_line_sample((-1,1), (3,1))
-        point_list_ob = self.straight_line_sample((-1,1), (3,1), height = 0.05)
-        # # print(point_list)
-        # self.print_list_visualize(point_list_ob)
-        # self.print_pointlist(point_list)
-
-
-        # point_list = self.get_circle_point((2,2), 1)
-        # point_list_ob = self.get_circle_point((2,2), 1, height = 0.05)
-
-        # self.print_future_visualize(point_list_ob[3:8])
-        self.print_pointlist(point_list)
-        # self.printing_visualize(point_list_ob)
-        # for i in range(len(point_list_ob)):
-        #     self.print_future_visualize(point_list_ob, i)
-
-        # self.print_future_visualize(point_list_ob, 1)
 
     def waypoint_execution_cb(self,msg):
         if len(msg.status_list)>0:
             self.waypoint_execution_status = msg.status_list[-1].status
             # print self.waypoint_execution_status
-
-    def check_inside_callback(self,data):
-        joint_data = data
-        self.base_group.set_position_target([0, 0, 0.1], self.base_group.get_end_effector_link())
-        result = self.base_group.plan()
-        print len(result.joint_trajectory.points)
-
-    # Sampling the points in straight
-    def straight_line_sample(self, start_point, end_point, resolution = 10, height = 0.1):
-        point_list = []
-        point_list.append((start_point[0], start_point[1], height))
-
-        # Calculate the distance between starting point and ending point
-        distance = np.sqrt(pow(start_point[0] - end_point[0], 2) + pow(start_point[1] - end_point[1], 2))
-
-        # Calculate the number of the waypoints
-        num_point = int(distance * resolution)
-
-        if num_point > 1:
-
-            # Add waypoints
-            for i in range(1, num_point):
-                x = start_point[0] + i * ((end_point[0] - start_point[0]) / (distance * resolution))
-                y = start_point[1] + i * ((end_point[1] - start_point[1]) / (distance * resolution))
-                point_list.append((x, y, height))
-
-        point_list.append((end_point[0], end_point[1], height))
-
-        return point_list
-
-   
 
     def move_to_initial(self, goal):
 
@@ -207,7 +150,7 @@ class arm_base_control:
 
         pose = self.group.get_current_pose(self.group.get_end_effector_link())
         constraints = Constraints()
-        last_ee_pose = self.group.get_current_pose().pose
+        last_ee_pose = point_list[0]
         #### joint constraints
         joint_constraint = JointConstraint()
         joint_constraint.joint_name = 'arm_joint_1'
@@ -237,7 +180,6 @@ class arm_base_control:
         orientation_constraint.weight = 1.0
 
         constraints.orientation_constraints.append(orientation_constraint)
-        j = 0
 
         # Record how many points has already finished
         finsih_num = 0
@@ -312,26 +254,16 @@ class arm_base_control:
 
 
                 while self.waypoint_execution_status != 3:
-                    # if self.waypoint_execution_status == 4:
-                    #     # aborted state
-                    #     print 'stop and abort waypoint execution'
-                    #     self.group.stop()
-                    #     executing_state = 0
-                    #     current_ee_pose = self.group.get_current_pose().pose
-                    #     self.printing_visualize((last_ee_pose.position.x, last_ee_pose.position.y, last_ee_pose.position.z), \
-                    #                         (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z))
-                    #     last_ee_pose = current_ee_pose
-                    #     break
 
                     current_ee_pose = self.group.get_current_pose().pose
                     current_ee_position_array = np.array([current_ee_pose.position.x,
                                                           current_ee_pose.position.y])
        
 
-                    self.printing_visualize((last_ee_pose.position.x, last_ee_pose.position.y, last_ee_pose.position.z), \
-                                            (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z))
+                    self.scene.printing_visualize(last_ee_pose, (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z), 
+                                                  name = 'printing point')
 
-                    last_ee_pose = current_ee_pose
+                    last_ee_pose = (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z)
                     executed_waypoint_index = self.check_executed_waypoint_index(success_planned_waypoint_array, current_ee_position_array)
 
                     # print 'last_ee', (last_ee_pose.position.x,last_ee_pose.position.y),     \
@@ -360,16 +292,14 @@ class arm_base_control:
                     # discard the executed waypoints
                     new_point_list = point_list[executed_waypoint_index+1:success_num]
 
-
-
                     # Add future printing obstacle
                     for k in new_point_list:
                         (current_ee_pose_smooth.position.x, current_ee_pose_smooth.position.y, current_ee_pose_smooth.position.z) = k
                         waypoints.append(copy.deepcopy(current_ee_pose_smooth))
 
-                    (plan2, fraction2) = self.group.compute_cartesian_path(waypoints,0.01,0.00,path_constraints = constraints)
+                    (plan2, fraction2) = self.group.compute_cartesian_path(waypoints, 0.01, 0.00, path_constraints = constraints)
 
-                    if fraction2 < 1.0:
+                    if fraction2 < 1:
                         ## new obstacle appear
                         # print 'executed latest index', executed_waypoint_index
                         # print 'fraction value', fraction,'\n'
@@ -377,12 +307,6 @@ class arm_base_control:
                         self.group.stop()
                         executing_state = 0
                         break
-
-                    j+=1
-
-                    if j == 2:
-                        self.scene.addBox('boxb',0.5,0.5,0.5, 2.5,0.5,0.15)
-                    rospy.sleep(0.01)
 
                 if self.waypoint_execution_status == 3:
                     # waypoint successfully printed
@@ -404,9 +328,4 @@ class arm_base_control:
         self.group.set_path_constraints(None)
         print 'all finish'
 
-if __name__ == '__main__':
-    try:
-        arm_base_printing()
-        moveit_commander.roscpp_shutdown()
-    except rospy.ROSInterruptException:
-        pass
+

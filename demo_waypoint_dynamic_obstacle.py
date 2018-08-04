@@ -489,16 +489,16 @@ class arm_base_printing:
 
 
                 while self.waypoint_execution_status != 3:
-                    # if self.waypoint_execution_status == 4:
-                    #     # aborted state
-                    #     print 'stop and abort waypoint execution'
-                    #     self.group.stop()
-                    #     executing_state = 0
-                    #     current_ee_pose = self.group.get_current_pose().pose
-                    #     self.printing_visualize((last_ee_pose.position.x, last_ee_pose.position.y, last_ee_pose.position.z), \
-                    #                         (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z))
-                    #     last_ee_pose = current_ee_pose
-                    #     break
+                    if self.waypoint_execution_status == 4:
+                        # aborted state
+                        print 'stop and abort waypoint execution'
+                        self.group.stop()
+                        executing_state = 0
+                        current_ee_pose = self.group.get_current_pose().pose
+                        self.printing_visualize((last_ee_pose.position.x, last_ee_pose.position.y, last_ee_pose.position.z), \
+                                            (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z))
+                        last_ee_pose = current_ee_pose
+                        break
 
                     current_ee_pose = self.group.get_current_pose().pose
                     current_ee_position_array = np.array([current_ee_pose.position.x,
