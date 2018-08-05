@@ -32,6 +32,7 @@ class arm_base_control:
         # Init moveit group
         self.group = moveit_commander.MoveGroupCommander('robot')
         self.arm_group = moveit_commander.MoveGroupCommander('arm')
+        self.base_group = moveit_commander.MoveGroupCommander('base')
 
         self.scene = Scene_obstacle()
 
@@ -43,9 +44,9 @@ class arm_base_control:
 
         sub_waypoint_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.waypoint_execution_cb)
         
-        # check_inside = rospy.Subscriber("joint_states", JointState, self.check_inside_callback)
-
         self.waypoint_execution_status = 0
+        self.further_printing_number = 0
+        self.future_printing_status = False
 
         self.group.allow_looking(1)
         self.group.allow_replanning(1)
@@ -59,7 +60,6 @@ class arm_base_control:
         msg_extrude = Float32()
         msg_extrude = 5.0
         extruder_publisher.publish(msg_extrude)
-
 
     def waypoint_execution_cb(self,msg):
         if len(msg.status_list)>0:
@@ -77,36 +77,6 @@ class arm_base_control:
             if len(result.joint_trajectory.points) < 180 and len(result.joint_trajectory.points) > 0 : break
 
         return result
-
-    def move_arm(self):
-
-        arm_pose = self.arm_group.get_current_pose(self.arm_group.get_end_effector_link())
-        print(arm_pose)
-
-        waypoints = []
-
-        scale = 1
-        wpose = self.arm_group.get_current_pose().pose
-
-        wpose.position.z = 0.1
-
-        waypoints.append(copy.deepcopy(wpose))
-
-        i = 0
-
-        while(i>10):
-
-            wpose.position.x = wpose.position.x - 0.005
-            wpose.position.y = wpose.position.x + 0.005
-            waypoints.append(copy.deepcopy(wpose))
-
-        (plan, fraction) = self.arm_group.compute_cartesian_path(
-            waypoints,   # waypoints to follow
-            0.01,        # eef_step
-            0.0)         # jump_threshold
-        print(fraction)
-
-        self.arm_group.execute(plan, wait = True)
 
     def check_executed_waypoint_index(self, success_planned_waypoints, current_ee_position):
         found_status = 0
@@ -146,12 +116,17 @@ class arm_base_control:
     def print_pointlist(self, point_list):
 
         # Save original points list
-        all_point_list = point_list
+        full_point_list = copy.deepcopy(point_list)
+        full_point_array = np.delete(np.array(full_point_list), 2, axis=1)
 
+
+        # Initial the previous printing point
+        last_ee_pose = point_list[0]
+
+        # Constraints
         pose = self.group.get_current_pose(self.group.get_end_effector_link())
         constraints = Constraints()
-        last_ee_pose = point_list[0]
-        #### joint constraints
+        # joint constraints
         joint_constraint = JointConstraint()
         joint_constraint.joint_name = 'arm_joint_1'
         joint_constraint.position = 169*pi/180
@@ -248,9 +223,12 @@ class arm_base_control:
             executed_waypoint_index = 0 # initial value of nothing
 
             if executing_state == 1:
+
+                if len(full_point_list) != len(point_list): self.future_printing_status = 1
+
                 success_planned_waypoint_array = np.delete(np.array(point_list[:success_num]), 2, axis=1)
-                print 'success planned waypoint\n', success_planned_waypoint_array
-                print 'status', self.waypoint_execution_status
+                # print 'success planned waypoint\n', success_planned_waypoint_array
+                # print 'status', self.waypoint_execution_status
 
 
                 while self.waypoint_execution_status != 3:
@@ -260,28 +238,21 @@ class arm_base_control:
                                                           current_ee_pose.position.y])
        
 
+                    # Add current printing obstacle
                     self.scene.printing_visualize(last_ee_pose, (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z), 
                                                   name = 'printing point')
 
+                    # Update previous printing point
                     last_ee_pose = (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z)
                     executed_waypoint_index = self.check_executed_waypoint_index(success_planned_waypoint_array, current_ee_position_array)
 
-                    # print 'last_ee', (last_ee_pose.position.x,last_ee_pose.position.y),     \
-                    #       'current_ee', (current_ee_pose.position.x,current_ee_pose.position.y),   \
-                    #       'executed latest index', executed_waypoint_index
-                    # print(executed_waypoint_index)
-                    # print 'current number', finsih_num + executed_waypoint_index, 'printing number', print_num
-                    
-                    # if finsih_num + executed_waypoint_index - print_num <= 2 and finsih_num + executed_waypoint_index - print_num >=-2:
-                    #     self.print_future_visualize(all_point_list, print_num)
-                    #     print_num = finsih_num + executed_waypoint_index + 1
-                        # # print(success_planned_waypoint_array.size)
-                        # print('printing')
-                        # print(finsih_num + executed_waypoint_index)
-                        # next_future_ob_index = finsih_num + executed_waypoint_index
-                        # if next_future_ob_index + 9 < len(all_point_list):
-                        #     self.future_visualize(all_point_list[next_future_ob_index + 8], all_point_list[next_future_ob_index + 9])
-                    
+                    index_check = self.check_executed_waypoint_index(full_point_array, current_ee_position_array)
+                    print 'index check:', index_check
+                    print 'status:', self.waypoint_execution_status
+
+                    if index_check >= self.further_printing_number:
+                        self.scene.print_future_visualize(full_point_list, index_check, status = self.future_printing_status, point_num = index_check - self.further_printing_number)
+                        self.further_printing_number = index_check
                     ## Replan to check for dynamic obstacle
                     waypoints = []
 
@@ -310,18 +281,19 @@ class arm_base_control:
 
                 if self.waypoint_execution_status == 3:
                     # waypoint successfully printed
-                    # self.print_list_visualize(point_list[:success_num])
-                    # print 'status 3', point_list[:success_num]
+
+                    print 'status 3', point_list[:success_num]
                     del(point_list[0:success_num-1])
                     finsih_num += success_num
 
+
                 elif self.waypoint_execution_status == 2 or 4:
                     # state 2 = preempted, state 4 = aborted.
-                    # only printed partial waypoint
-                    # self.print_list_visualize(point_list[:executed_waypoint_index+1])
-                    # print 'status 4', point_list[:executed_waypoint_index+1]
+  
+                    print 'status 4', point_list[:executed_waypoint_index+1]
                     del(point_list[:executed_waypoint_index+1]) # delete up till whatever is executed
                     finsih_num += executed_waypoint_index + 1
+                executing_state = 0
             self.msg_print.data = False
 
 

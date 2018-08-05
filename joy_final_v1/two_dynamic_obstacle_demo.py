@@ -36,10 +36,10 @@ class dynamic_obstacle_demo:
         control.print_pointlist(point_list)
 
         
-        # Happy ending
-        control.group.set_position_target([0, 0, 0.1], control.group.get_end_effector_link())
+        # # Happy ending
+        # control.group.set_position_target([0, 0, 0.1], control.group.get_end_effector_link())
 
-        control.group.go()
+        # control.group.go(wait = False)
 
 
 

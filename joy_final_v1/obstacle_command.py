@@ -24,6 +24,7 @@ class Scene_obstacle(object):
 
         # initial printing number 
         self._printing_number = 0
+        self.further_printing_number = 0
 
     # Demo 1 scene
     def add_three_box_obstacle(self):
@@ -119,6 +120,67 @@ class Scene_obstacle(object):
         if len(way_points)>0:
             way_points = [way_points[0]] + way_points
             differential = map(self.printing_visualize, way_points[:-1], way_points[1:])
+
+    def future_visualize(self, start_point, end_point):
+        # print(start_point)
+        rospy.sleep(0.05)
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = "odom"
+        box_pose.pose.position.x = (end_point[0] + start_point[0]) / 2.000000
+        box_pose.pose.position.y = (end_point[1] + start_point[1]) / 2.000000
+        box_pose.pose.position.z = (end_point[2] + start_point[2]) / 2.000000 - 0.05
+
+        (roll, pitch, yaw) = euler_from_quaternion([box_pose.pose.orientation.x,
+                                                    box_pose.pose.orientation.y,
+                                                    box_pose.pose.orientation.z,
+                                                    box_pose.pose.orientation.w])
+
+        yaw = atan2((end_point[1] - start_point[1]),(end_point[0] - start_point[0]))
+
+        [box_pose.pose.orientation.x, \
+         box_pose.pose.orientation.y, \
+         box_pose.pose.orientation.z, \
+         box_pose.pose.orientation.w] = \
+            quaternion_from_euler(roll, pitch, yaw )
+
+        length = sqrt(pow((end_point[0] - start_point[0]), 2) + \
+                      pow((end_point[1] - start_point[1]), 2) + \
+                      pow((end_point[2] - start_point[2]), 2))
+
+
+        self.further_printing_number += 1
+        if self.further_printing_number == 3: self.further_printing_number = 0
+        box_name = 'future_point' + str(self.further_printing_number)
+        self.pub_co.publish(self.make_box(box_name, box_pose, size=(length, 0.01, 0.01)))
+
+        rospy.sleep(0.05)
+
+    def print_future_visualize(self, way_points, index, step = 5, length = 3, status = True, point_num = 1):
+
+        # There is no future obstacle here
+        if status == False:
+            if len(way_points) > index + step:
+                # Print full length future obstacles
+                if len(way_points) > index + step + length:
+                    differential = map(self.future_visualize, 
+                                       way_points[index+step:index+step+length], \
+                                       way_points[index+step+1:index+step+length+1])
+                # Print partial future obstacle
+                else:
+                    differential = map(self.future_visualize, way_points[index+step:-1], way_points[index+step+1:])
+        # There already have future obstacle            
+        else:
+            if len(way_points) > index + step:
+                # Add obstacle
+                if len(way_points) > index + step + length:
+                    differential = map(self.future_visualize, 
+                                       way_points[index+length+step-point_num:index+length+step-1], \
+                                       way_points[index+length+step-point_num+1:index+length+step])
+                # Remove obstacle
+                else:
+                    loop_num = step + length + index - len(point_list) -1 
+                    for i in range(loop_num):
+                        self.future_visualize(way_points[-1], way_points[-1])
 
     def get_circle_point(self, circle_center, radius, height = 0.1, degree_resolution = 10):
 
