@@ -34,7 +34,8 @@ class arm_base_control:
         self.arm_group = moveit_commander.MoveGroupCommander('arm')
         self.base_group = moveit_commander.MoveGroupCommander('base')
 
-        self.scene = Scene_obstacle()
+        self.scene = moveit_commander.PlanningSceneInterface()
+        self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=100)
 
         self.msg_print = SetBoolRequest()
 
@@ -46,6 +47,10 @@ class arm_base_control:
         
         self.waypoint_execution_status = 0
         self.further_printing_number = 0
+
+        # initial printing number 
+        self._printing_number = 0
+        self._further_printing_number = 0
         self.future_printing_status = False
 
         self.group.allow_looking(1)
@@ -61,6 +66,208 @@ class arm_base_control:
         msg_extrude = 5.0
         extruder_publisher.publish(msg_extrude)
 
+    # Demo 1 scene
+    def add_three_box_obstacle(self):
+        ###Add obstacle
+        rospy.sleep(0.5)
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = "odom"
+        box_pose.pose.position.x = 0
+        box_pose.pose.position.y = 3
+        box_pose.pose.position.z = 0.01
+        box_name = "wall"
+        self.scene.add_box(box_name, box_pose, size=(2, 0.01, 0.01))
+        rospy.sleep(0.5)
+
+        rospy.sleep(0.5)
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = "odom"
+        box_pose.pose.position.x = -0.75
+        box_pose.pose.position.y = 3.5
+        box_pose.pose.position.z = 0.2
+        box_one = "box_1"
+        self.scene.add_box(box_one, box_pose, size=(0.5, 0.5, 0.5))
+        rospy.sleep(0.5)
+
+        rospy.sleep(0.5)
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = "odom"
+        box_pose.pose.position.x = -0
+        box_pose.pose.position.y = 2.7
+        box_pose.pose.position.z = 0.2
+        box_two = "box_2"
+        self.scene.add_box(box_two, box_pose, size=(0.5, 0.5, 0.5))
+        rospy.sleep(0.5)
+
+        rospy.sleep(0.5)
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = "odom"
+        box_pose.pose.position.x = 0.75
+        box_pose.pose.position.y = 3.5
+        box_pose.pose.position.z = 0.2
+        box_three = "box_3"
+        self.scene.add_box(box_three, box_pose, size=(0.5, 0.5, 0.5))
+        rospy.sleep(0.5)
+
+    def make_box(self, name, pose, size = (0.5, 0.5, 0.5)):
+        co = CollisionObject()
+        co.operation = CollisionObject.ADD
+        co.id = name
+        co.header = pose.header
+        box = SolidPrimitive()
+        box.type = SolidPrimitive.BOX
+        box.dimensions = list(size)
+        co.primitives = [box]
+        co.primitive_poses = [pose.pose]
+        return co
+
+    # Add a line obstacle between two points (only concern about same height)
+    def printing_visualize(self, start_point, end_point, name = 'obstacle'):
+        # print(start_point)
+        rospy.sleep(0.05)
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = "odom"
+        box_pose.pose.position.x = (end_point[0] + start_point[0]) / 2.000000
+        box_pose.pose.position.y = (end_point[1] + start_point[1]) / 2.000000
+        box_pose.pose.position.z = (end_point[2] + start_point[2]) / 2.000000 - 0.05
+
+        (roll, pitch, yaw) = euler_from_quaternion([box_pose.pose.orientation.x,
+                                                    box_pose.pose.orientation.y,
+                                                    box_pose.pose.orientation.z,
+                                                    box_pose.pose.orientation.w])
+
+        yaw = atan2((end_point[1] - start_point[1]),(end_point[0] - start_point[0]))
+
+        [box_pose.pose.orientation.x, \
+         box_pose.pose.orientation.y, \
+         box_pose.pose.orientation.z, \
+         box_pose.pose.orientation.w] = \
+            quaternion_from_euler(roll, pitch, yaw )
+
+        length = sqrt(pow((end_point[0] - start_point[0]), 2) + \
+                      pow((end_point[1] - start_point[1]), 2) + \
+                      pow((end_point[2] - start_point[2]), 2))
+
+
+        self._printing_number += 1
+        box_name = str(name) + str(self._printing_number)
+        self.pub_co.publish(self.make_box(box_name, box_pose, size=(length, 0.01, 0.01)))
+
+        rospy.sleep(0.05)
+
+    def print_list_visualize(self, way_points, name = 'obstacle'):
+
+        ob_name = []
+        for point in way_points:
+            ob_name.append(name)
+        if len(way_points)>0:
+            way_points = [way_points[0]] + way_points
+            differential = map(self.printing_visualize, way_points[:-1], way_points[1:], ob_name)
+
+    def future_visualize(self, start_point, end_point):
+        # print(start_point)
+        rospy.sleep(0.05)
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = "odom"
+        box_pose.pose.position.x = (end_point[0] + start_point[0]) / 2.000000
+        box_pose.pose.position.y = (end_point[1] + start_point[1]) / 2.000000
+        box_pose.pose.position.z = (end_point[2] + start_point[2]) / 2.000000 - 0.05
+
+        (roll, pitch, yaw) = euler_from_quaternion([box_pose.pose.orientation.x,
+                                                    box_pose.pose.orientation.y,
+                                                    box_pose.pose.orientation.z,
+                                                    box_pose.pose.orientation.w])
+
+        yaw = atan2((end_point[1] - start_point[1]),(end_point[0] - start_point[0]))
+
+        [box_pose.pose.orientation.x, \
+         box_pose.pose.orientation.y, \
+         box_pose.pose.orientation.z, \
+         box_pose.pose.orientation.w] = \
+            quaternion_from_euler(roll, pitch, yaw )
+
+        length = sqrt(pow((end_point[0] - start_point[0]), 2) + \
+                      pow((end_point[1] - start_point[1]), 2) + \
+                      pow((end_point[2] - start_point[2]), 2))
+
+
+        self._further_printing_number += 1
+        if self._further_printing_number == 5: self._further_printing_number = 0
+        box_name = 'future_point' + str(self._further_printing_number)
+        self.pub_co.publish(self.make_box(box_name, box_pose, size=(length, 0.01, 0.01)))
+
+        rospy.sleep(0.05)
+
+    def print_future_visualize(self, way_points, index, step = 8, length = 5, status = True, point_num = 1):
+
+        # There is no future obstacle here
+        if status == False:
+            if len(way_points) > index + step:
+                # Print full length future obstacles
+                if len(way_points) > index + step + length:
+                    differential = map(self.future_visualize, 
+                                       way_points[index+step:index+step+length], \
+                                       way_points[index+step+1:index+step+length+1])
+                # Print partial future obstacle
+                else:
+                    differential = map(self.future_visualize, way_points[index+step:-1], way_points[index+step+1:])
+        # There already have future obstacle            
+        else:
+            if len(way_points) > index + step:
+                # Add obstacle
+                if len(way_points) > index + step + length:
+                    differential = map(self.future_visualize, 
+                                       way_points[index+length+step-point_num:index+length+step-1], \
+                                       way_points[index+length+step-point_num+1:index+length+step])
+                # Remove obstacle
+                else:
+                    loop_num = step + length + index - len(way_points) -1 
+                    for i in range(loop_num):
+                        self.future_visualize(way_points[-1], way_points[-1])
+
+    def get_circle_point(self, circle_center, radius, height = 0.1, degree_resolution = 10):
+
+        point_list = []
+        degree = 0
+
+        while(degree < 360):
+
+            theta = degree * pi / 180
+
+            point_list.append(( circle_center[0] + radius * cos(theta), \
+                                circle_center[1] + radius * sin(theta), height))
+
+            degree = degree + degree_resolution
+
+        point_list.append(( circle_center[0] + radius * cos(2*pi), \
+                            circle_center[1] + radius * sin(2*pi), height))
+
+        return point_list
+
+
+    # Sampling the points in straight
+    def straight_line_sample(self, start_point, end_point, resolution = 10, height = 0.1):
+        point_list = []
+        point_list.append((start_point[0], start_point[1], height))
+
+        # Calculate the distance between starting point and ending point
+        distance = np.sqrt(pow(start_point[0] - end_point[0], 2) + pow(start_point[1] - end_point[1], 2))
+
+        # Calculate the number of the waypoints
+        num_point = int(distance * resolution)
+
+        if num_point > 1:
+
+            # Add waypoints
+            for i in range(1, num_point):
+                x = start_point[0] + i * ((end_point[0] - start_point[0]) / (distance * resolution))
+                y = start_point[1] + i * ((end_point[1] - start_point[1]) / (distance * resolution))
+                point_list.append((x, y, height))
+
+        point_list.append((end_point[0], end_point[1], height))
+
+        return point_list
+
     def waypoint_execution_cb(self,msg):
         if len(msg.status_list)>0:
             self.waypoint_execution_status = msg.status_list[-1].status
@@ -71,7 +278,7 @@ class arm_base_control:
         self.group.set_position_target([goal[0], goal[1], goal[2]], self.group.get_end_effector_link())
         while(1):
             result = self.group.plan()
-            print 'number of points in trajectory:', len(result.joint_trajectory.points)
+            # print 'number of points in trajectory:', len(result.joint_trajectory.points)
 
             # Threshold for short path
             if len(result.joint_trajectory.points) < 180 and len(result.joint_trajectory.points) > 0 : break
@@ -119,6 +326,8 @@ class arm_base_control:
         full_point_list = copy.deepcopy(point_list)
         full_point_array = np.delete(np.array(full_point_list), 2, axis=1)
 
+        self.print_future_visualize(full_point_list, 0, status = self.future_printing_status) 
+        self.future_printing_status = 1
 
         # Initial the previous printing point
         last_ee_pose = point_list[0]
@@ -159,6 +368,7 @@ class arm_base_control:
         # Record how many points has already finished
         finsih_num = 0
         print_num = 0
+        index_check = 0
         while len(point_list) > 1:
 
             # Move the robot point to first point and find the height
@@ -236,14 +446,37 @@ class arm_base_control:
                     current_ee_pose = self.group.get_current_pose().pose
                     current_ee_position_array = np.array([current_ee_pose.position.x,
                                                           current_ee_pose.position.y])
-       
 
-                    # Add current printing obstacle
-                    self.scene.printing_visualize(last_ee_pose, (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z), 
-                                                  name = 'printing point')
+                    if self.waypoint_execution_status == 4:
+                        # aborted state
+                        print 'stop and abort waypoint execution'
+                        self.group.stop()
+                        executing_state = 0
+                        self.group.clear_pose_targets()
+                        break      
 
-                    # Update previous printing point
-                    last_ee_pose = (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z)
+                    if self.waypoint_execution_status == 1:
+                        # Add current printing obstacle
+                        self.printing_visualize(last_ee_pose, (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z), 
+                                                      name = 'printing point')
+
+                        # Update previous printing point
+                        last_ee_pose = (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z)
+
+                        # Check for enclosure
+                        self.base_group.set_position_target([0, 0, 0.05], self.base_group.get_end_effector_link())
+                        result = self.base_group.plan()
+                        self.base_group.clear_pose_targets()
+
+                        if len(result.joint_trajectory.points) == 0: 
+                            print('Check enclosure failed')
+                            self.group.stop()
+                            executing_state = 0
+                            break
+                        else: print('Check enclosure successful')
+
+                    
+
                     executed_waypoint_index = self.check_executed_waypoint_index(success_planned_waypoint_array, current_ee_position_array)
 
                     index_check = self.check_executed_waypoint_index(full_point_array, current_ee_position_array)
@@ -251,25 +484,8 @@ class arm_base_control:
                     # print 'status:', self.waypoint_execution_status
 
                     if index_check >= self.further_printing_number:
-                        self.scene.print_future_visualize(full_point_list, index_check, status = self.future_printing_status, point_num = index_check - self.further_printing_number)
+                        self.print_future_visualize(full_point_list, index_check, status = self.future_printing_status, point_num = index_check - self.further_printing_number)
                         self.further_printing_number = index_check
-
-
-                    # waypoints = []
-
-                    # # Add the current pose to make sure the path is smooth, get latest pose
-                    # current_base_pose = self.base_group.get_current_pose().pose
-                    # waypoints.append(copy.deepcopy(current_base_pose))
-
-                    # # Add future printing obstacle
-                    # (current_base_pose.position.x, current_base_pose.position.y, current_base_pose.position.z) = (0, 0, 0.05)
-                    # waypoints.append(copy.deepcopy(current_base_pose))
-
-                    # (plan_base, fraction_base) = self.base_group.compute_cartesian_path(waypoints, 0.01, 0.00)
-
-                    self.base_group.set_position_target([0, 0, 0.05], self.base_group.get_end_effector_link())
-                    result = self.base_group.plan()
-                    print(len(result.joint_trajectory.points))
 
                     ## Replan to check for dynamic obstacle
                     waypoints = []
@@ -279,7 +495,7 @@ class arm_base_control:
                     waypoints.append(copy.deepcopy(current_ee_pose_smooth))
 
                     # discard the executed waypoints
-                    new_point_list = point_list[executed_waypoint_index+1:success_num]
+                    new_point_list = copy.deepcopy(point_list[executed_waypoint_index+1:success_num])
 
                     # Add future printing obstacle
                     for k in new_point_list:
@@ -300,18 +516,22 @@ class arm_base_control:
                 if self.waypoint_execution_status == 3:
                     # waypoint successfully printed
 
-                    print 'status 3', point_list[:success_num]
-                    del(point_list[0:success_num-1])
-                    finsih_num += success_num
+                    print 'status 3', executed_waypoint_index, point_list[:success_num]
+                    del(point_list[0:executed_waypoint_index+1])
+                    finsih_num += executed_waypoint_index + 1
 
 
                 elif self.waypoint_execution_status == 2 or 4:
                     # state 2 = preempted, state 4 = aborted.
   
-                    print 'status 4', point_list[:executed_waypoint_index+1]
+                    print 'status 4', executed_waypoint_index,  point_list[:executed_waypoint_index+1]
                     del(point_list[:executed_waypoint_index+1]) # delete up till whatever is executed
                     finsih_num += executed_waypoint_index + 1
+
+                self.group.clear_pose_targets()
+
                 executing_state = 0
+                print('point list left:', len(point_list))
             self.msg_print.data = False
 
 
