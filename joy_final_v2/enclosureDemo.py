@@ -57,6 +57,7 @@ class enclosure_demo:
         
         while not rospy.is_shutdown():
             # Check for enclosure
+            rospy.sleep(0.05)
             control.base_group.set_position_target([0, 0, 0.05], control.base_group.get_end_effector_link())
             result = control.base_group.plan()
             control.base_group.clear_pose_targets()

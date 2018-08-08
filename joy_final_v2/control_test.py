@@ -21,6 +21,8 @@ import numpy as np
 from actionlib_msgs.msg import GoalStatusArray
 import moveit_python
 from obstacle_command import Scene_obstacle
+from visualization_msgs.msg import Marker
+import re
 
 class arm_base_control:
     def __init__(self):
@@ -35,6 +37,8 @@ class arm_base_control:
         self.base_group = moveit_commander.MoveGroupCommander('base')
 
         self.scene = moveit_commander.PlanningSceneInterface()
+
+        self.sce = moveit_python.PlanningSceneInterface('odom')
         self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=100)
 
         self.msg_print = SetBoolRequest()
@@ -45,15 +49,23 @@ class arm_base_control:
 
         sub_waypoint_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.waypoint_execution_cb)
         sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
-        
+        sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
+        rospy.Subscriber("joint_states", JointState, self.further_ob_printing)
+    
         self.waypoint_execution_status = 0
         self.move_group_execution_status = 0
         self.further_printing_number = 0
+        self.pre_further_printing_number = 0
 
         # initial printing number 
         self._printing_number = 0
         self._further_printing_number = 0
         self.future_printing_status = False
+
+        self.current_printing_pose = None
+        self.previous_printing_pose = None
+
+        self.target_list = None
 
         self.group.allow_looking(1)
         self.group.allow_replanning(1)
@@ -67,7 +79,49 @@ class arm_base_control:
         msg_extrude = Float32()
         msg_extrude = 5.0
         extruder_publisher.publish(msg_extrude)
+        self.pub_rviz_marker = rospy.Publisher('/visualization_marker', Marker, queue_size=100)
+        self.remove_all_rviz_marker()
+        self.printing_number_rviz = 0
 
+    def remove_all_rviz_marker(self):
+        marker = Marker()
+        marker.header.frame_id = "/odom"
+        marker.action = marker.DELETEALL
+        # publish a few times to ensure it successfully received
+        for i in range(5):
+            self.pub_rviz_marker.publish(marker)
+            rospy.sleep(0.1)
+
+    def rviz_visualise_marker(self, point_list):
+        triple_points = []
+
+        for (x,y,z) in point_list:
+            p = Point()
+            p.x = x
+            p.y = y
+            p.z = z
+            triple_points.append(p)
+
+        marker = Marker()
+        marker.header.frame_id = "/odom"
+        # marker.ns = 'robot' + str(self.robot_id)
+        marker.id = self.printing_number_rviz
+        marker.type = marker.LINE_STRIP
+        marker.action = marker.ADD
+        marker.pose.orientation.w = 1
+
+        marker.points = triple_points
+        marker.lifetime = rospy.Duration(0) # 0 means forever
+        marker.scale.x = 0.05 # linestrip only needs scale.x
+        marker.color.a = 1.0 # opacity value
+        marker.color.r = 1.0 # rgb value
+
+        self.printing_number_rviz += 1
+
+        # publish a few times to ensure it successfully received
+        for i in range(5):
+            self.pub_rviz_marker.publish(marker)
+            rospy.sleep(0.1)
     # Demo 1 scene
     def add_three_box_obstacle(self):
         ###Add obstacle
@@ -154,7 +208,6 @@ class arm_base_control:
         self._printing_number += 1
         box_name = str(name) + str(self._printing_number)
         self.pub_co.publish(self.make_box(box_name, box_pose, size=(length, 0.01, 0.01)))
-
         rospy.sleep(0.05)
 
     def print_list_visualize(self, way_points, name = 'obstacle'):
@@ -198,6 +251,7 @@ class arm_base_control:
         box_name = 'future_point' + str(self._further_printing_number)
         self.pub_co.publish(self.make_box(box_name, box_pose, size=(length, 0.01, 0.01)))
 
+
         rospy.sleep(0.05)
 
     def print_future_visualize(self, way_points, index, step = 8, length = 5, status = True, point_num = 1):
@@ -221,11 +275,11 @@ class arm_base_control:
                     differential = map(self.future_visualize, 
                                        way_points[index+length+step-point_num:index+length+step-1], \
                                        way_points[index+length+step-point_num+1:index+length+step])
-                # Remove obstacle
-                else:
-                    loop_num = step + length + index - len(way_points) -1 
-                    for i in range(loop_num):
-                        self.future_visualize(way_points[-1], way_points[-1])
+                # # Remove obstacle
+                # else:
+                #     loop_num = step + length + index - len(way_points) -1 
+                #     for i in range(loop_num):
+                #         self.future_visualize(way_points[-1], way_points[-1])
 
     def get_circle_point(self, circle_center, radius, height = 0.1, degree_resolution = 10):
 
@@ -276,9 +330,43 @@ class arm_base_control:
             # print self.waypoint_execution_status
 
     def move_group_execution_cb(self,msg):
-        if len(msg.status_list)>0:
-            self.move_group_execution_status = msg.status_list[-1].status
-            # print self.waypoint_execution_status
+        # Add current printing obstacle
+        if self.msg_print.data == True:
+            current_ee_pose = self.group.get_current_pose().pose
+            self.current_printing_pose = (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z)
+            if self.current_printing_pose and self.previous_printing_pose:
+                self.printing_visualize(self.current_printing_pose, self.previous_printing_pose, name = 'printing point')
+            # Update previous printing point
+            self.previous_printing_pose = self.current_printing_pose
+
+
+
+    def further_ob_printing(self,msg):
+        if self.future_printing_status:
+
+            current_future_ob_list = self.sce.getKnownCollisionObjects()
+            future_printing_already = False
+
+            for point_name in current_future_ob_list:
+                result = re.match('future_ob', point_name)
+                if result:
+                    future_printing_already = True
+                    break
+               
+            if self.further_printing_number == 0:
+                self.print_future_visualize(
+                    self.target_list, 
+                    self.further_printing_number, 
+                    status = future_printing_already)
+
+            else:
+
+                self.print_future_visualize(
+                    self.target_list, 
+                    self.further_printing_number, 
+                    status = future_printing_already, 
+                    point_num = self.further_printing_number - self.pre_further_printing_number)
+            self.pre_further_printing_number = self.further_printing_number
 
     def move_to_initial(self, goal):
 
@@ -327,18 +415,16 @@ class arm_base_control:
 
         return waypoint_index
 
-    def print_pointlist(self, point_list, future_print_status = False):
+    def print_pointlist(self, point_list, future_print_status = True):
 
         # Save original points list
         full_point_list = copy.deepcopy(point_list)
+
         full_point_array = np.delete(np.array(full_point_list), 2, axis=1)
 
-        if future_print_status:
-            self.print_future_visualize(full_point_list, 0, status = self.future_printing_status) 
-            self.future_printing_status = 1
+        self.target_list = full_point_list
 
-        # Initial the previous printing point
-        last_ee_pose = point_list[0]
+        if future_print_status: self.future_printing_status = True
 
         # Constraints
         pose = self.group.get_current_pose(self.group.get_end_effector_link())
@@ -423,13 +509,14 @@ class arm_base_control:
                     0.00,
                     path_constraints = constraints)
 
-                print('plan', fraction)
+                print'Adding the first planing point, and fraction is', fraction
                 executing_state = 0
                 if fraction == 1:
                     success_num += 1
                     execute_plan = plan
                     if success_num == len(point_list):
-                        self.group.execute(execute_plan, wait=True)
+                        self.group.execute(execute_plan, wait=False)
+                        self.msg_print.data = True
                         executing_state = 1
                         success_num += 1
 
@@ -438,13 +525,9 @@ class arm_base_control:
                 else:
                     # execute success plan
                     self.msg_print.data = True
-                    self.group.execute(execute_plan, wait=True)
+                    self.group.execute(execute_plan, wait=False)
                     executing_state = 1
                     break
-
-            # Delete the points what already execute
-            if success_num > 0: 
-                del(point_list[0:success_num-1])
 
             ## 2nd loop
             ## always re-plan and check for obstacle while executing waypoints
@@ -452,119 +535,97 @@ class arm_base_control:
             executed_waypoint_index = 0 # initial value of nothing
 
             success_point_list = point_list[:success_num]
-            print('when plan success, move_group_status:', self.move_group_execution_status)
+            print('when plan success, move_group_status:', self.move_group_execution_status, 'success_plan_number:', success_num)
 
-            if executing_state == 1:
-
-                # if len(full_point_list) != len(point_list): self.future_printing_status = 1
-
-
+            if executing_state == 1 :
+                success_planned_waypoint_array = np.delete(np.array(point_list[:success_num]), 2, axis=1)
                 # print 'success planned waypoint\n', success_planned_waypoint_array
-                # print 'status', self.waypoint_execution_status
+                print 'status', self.waypoint_execution_status
 
-                while self.waypoint_execution_status != 3 and len(success_point_list)>0:
-
-                    print(len(success_point_list))
-                    success_planned_waypoint_array = np.delete(np.array(success_point_list), 2, axis=1)
-                    if self.waypoint_execution_status == 4 or self.move_group_execution_status == 4:
+                while self.waypoint_execution_status != 3:
+                    if self.waypoint_execution_status == 4:
                         # aborted state
                         print 'stop and abort waypoint execution'
+                        self.msg_print.data = False
                         self.group.stop()
                         executing_state = 0
-                        self.group.clear_pose_targets()
-                        break      
-
-                    # if self.waypoint_execution_status == 1:
-
-                    #     # Check for enclosure
-                    #     self.base_group.set_position_target([0, 0, 0.05], self.base_group.get_end_effector_link())
-                    #     result = self.base_group.plan()
-                    #     self.base_group.clear_pose_targets()
-
-                    #     if len(result.joint_trajectory.points) == 0: 
-                    #         print('Check enclosure failed')
-                    #         self.group.stop()
-                    #         executing_state = 0
-                    #         break
-                    #     else: print('Check enclosure successful')
+                        break
 
                     current_ee_pose = self.group.get_current_pose().pose
                     current_ee_position_array = np.array([current_ee_pose.position.x,
                                                           current_ee_pose.position.y])
 
-
-                    # Add current printing obstacle
-                    # self.printing_visualize(last_ee_pose, (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z), 
-                    #                               name = 'printing point')
-
-                    # Update previous printing point
-                    last_ee_pose = (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z)
-
                     executed_waypoint_index = self.check_executed_waypoint_index(success_planned_waypoint_array, current_ee_position_array)
-
-                    
-
-                    del(point_list[:executed_waypoint_index+1])
-                    del(success_point_list[:executed_waypoint_index+1])
+                    # print 'executed latest index', executed_waypoint_index
 
                     index_check = self.check_executed_waypoint_index(full_point_array, current_ee_position_array)
-                    print 'index check:', index_check, executed_waypoint_index
-                    # print 'status:', self.waypoint_execution_status
+                    self.further_printing_number = index_check
+                    print 'index:', index_check, 'way_point index', executed_waypoint_index
 
-                    if future_print_status:
-                        if index_check >= self.further_printing_number:
-                            self.print_future_visualize(full_point_list, index_check, status = self.future_printing_status, point_num = index_check - self.further_printing_number)
-                            self.further_printing_number = index_check
+                    if future_print_status == True:
+
+                        # Check for enclosure
+                        self.base_group.set_position_target([0, 0, 0.05], self.base_group.get_end_effector_link())
+                        result = self.base_group.plan()
+                        self.base_group.clear_pose_targets()
+
+                        if len(result.joint_trajectory.points) == 0: 
+                            print('Check enclosure failed')
+
+                        else: print('Check enclosure successful')
 
                     ## Replan to check for dynamic obstacle
                     waypoints = []
-
                     # Add the current pose to make sure the path is smooth, get latest pose
-                    current_ee_pose_smooth = self.group.get_current_pose().pose
-                    waypoints.append(copy.deepcopy(current_ee_pose_smooth))
+                    current_ee_pose = self.group.get_current_pose().pose
+                    waypoints.append(copy.deepcopy(current_ee_pose))
 
                     # discard the executed waypoints
-                    new_point_list = copy.deepcopy(success_point_list[executed_waypoint_index+1:])
+                    new_point_list = point_list[executed_waypoint_index:success_num]
 
-                    # Add future printing obstacle
                     for k in new_point_list:
-                        (current_ee_pose_smooth.position.x, current_ee_pose_smooth.position.y, current_ee_pose_smooth.position.z) = k
-                        waypoints.append(copy.deepcopy(current_ee_pose_smooth))
+                        (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z) = k
+                        waypoints.append(copy.deepcopy(current_ee_pose))
 
-                    (plan2, fraction2) = self.group.compute_cartesian_path(waypoints, 0.01, 0.00, path_constraints = constraints)
-
-                    if fraction2 < 0.95:
+                    (plan2, fraction2) = self.group.compute_cartesian_path(
+                                                waypoints,  # waypoints to follow
+                                                0.01,        # eef_step
+                                                0.00,
+                                                path_constraints = constraints)
+                    print 'Dynamic check fraction:', fraction2
+                    if fraction2 < 1.0:
                         ## new obstacle appear
                         # print 'executed latest index', executed_waypoint_index
                         # print 'fraction value', fraction,'\n'
-                        print 'new obstacle appeared along the planned path', 'fraction2:', fraction2
+                        print 'new obstacle appeared to be in the path'
                         self.group.stop()
+                        self.msg_print.data = False
                         executing_state = 0
                         break
 
+                rospy.sleep(0.5)
+
+                print 'status:', self.waypoint_execution_status, 'executed_index:',executed_waypoint_index, 'success_num:', success_num
+
                 if self.waypoint_execution_status == 3:
                     # waypoint successfully printed
-
-                    print 'status 3', executed_waypoint_index, point_list[:success_num]
-                    # del(point_list[0:executed_waypoint_index+1])
-                    finsih_num += executed_waypoint_index + 1
-
+                    # self.print_list_visualize(point_list[:success_num])
+                    self.rviz_visualise_marker(point_list[:success_num])
+                    del(point_list[:success_num-1])
 
                 elif self.waypoint_execution_status == 2 or 4:
                     # state 2 = preempted, state 4 = aborted.
-  
-                    print 'status 4', executed_waypoint_index,  point_list[:executed_waypoint_index+1]
-                    # del(point_list[:executed_waypoint_index+1]) # delete up till whatever is executed
-                    finsih_num += executed_waypoint_index + 1
+                    # only printed partial waypoint
+                    # self.print_list_visualize(point_list[:executed_waypoint_index+1])
+                    if executed_waypoint_index > 0: # at index 0, it might have not print the point 0-1 edge successfully.
+                        self.rviz_visualise_marker(point_list[:executed_waypoint_index+1])
+                        del(point_list[:executed_waypoint_index]) # delete up till whatever is executed
 
-                self.group.clear_pose_targets()
-                self.group.stop()
-                executing_state = 0
-                print('point list left:', len(point_list))
             self.msg_print.data = False
-
+            self.group.stop()
+            # Delete the points what already execute
+            # if success_num > 0:
+                # Add obstacle after printing (need to revise)
 
         self.group.set_path_constraints(None)
         print 'all finish'
-
-

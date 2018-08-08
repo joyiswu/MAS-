@@ -13,7 +13,7 @@ import geometry_msgs.msg
 from geometry_msgs.msg import * 
 import moveit_python
 from obstacle_command import Scene_obstacle
-from control_command import arm_base_control
+from control_test import arm_base_control
 
 class enclosure_demo:
     def __init__(self):
@@ -43,14 +43,14 @@ class enclosure_demo:
         point_list += control.straight_line_sample((-1,1), (2,1))
         point_list += control.straight_line_sample((2,1), (2,3))
         point_list += control.straight_line_sample((1,3), (0,3))
-        point_list_0 = control.straight_line_sample((0,3), (0,1))
+        point_list += control.straight_line_sample((0,3), (0,1))
 
 
 
         # point_list_ob = scene.get_circle_point((2,2), 1, height = 0.05)
-        control.print_list_visualize(point_list)
-        control.print_list_visualize(point_list_0, name = 'future_ob')
-        # control.print_pointlist(point_list)
+        # control.print_list_visualize(point_list)
+        # control.print_list_visualize(point_list_0, name = 'future_ob')
+        control.print_pointlist(point_list)
 
         
         # # Happy ending
