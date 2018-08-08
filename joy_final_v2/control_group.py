@@ -24,37 +24,33 @@ from obstacle_command import Scene_obstacle
 from visualization_msgs.msg import Marker
 import re
 
-class arm_base_control():
-    def __init__(self, name_space):
+class arm_base_control:
+    def __init__(self):
 
         moveit_commander.roscpp_initialize(sys.argv)
 
-        # current_robot_ns = rospy.get_namespace()
-        # current_robot_ns=current_robot_ns[1:-1]
-        current_robot_ns = name_space
-
-        self.robot = moveit_commander.RobotCommander(current_robot_ns+'/robot_description',current_robot_ns)
+        self.robot = moveit_commander.RobotCommander()
 
         # Init moveit group
-        self.group = moveit_commander.MoveGroupCommander('robot', current_robot_ns+'/robot_description',current_robot_ns)
-        self.arm_group = moveit_commander.MoveGroupCommander('arm',current_robot_ns+'/robot_description',current_robot_ns)
-        self.base_group = moveit_commander.MoveGroupCommander('base', current_robot_ns+'/robot_description',current_robot_ns)
+        self.group = moveit_commander.MoveGroupCommander('robot')
+        self.arm_group = moveit_commander.MoveGroupCommander('arm')
+        self.base_group = moveit_commander.MoveGroupCommander('base')
 
         self.scene = moveit_commander.PlanningSceneInterface()
 
-        self.sce = moveit_python.PlanningSceneInterface('odom', current_robot_ns)
-        self.pub_co = rospy.Publisher('/'+current_robot_ns+'/collision_object', CollisionObject, queue_size=100)
+        self.sce = moveit_python.PlanningSceneInterface('odom')
+        self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=100)
 
         self.msg_print = SetBoolRequest()
 
-        self.request_fk = rospy.ServiceProxy('/'+current_robot_ns+'/compute_fk', GetPositionFK)
+        self.request_fk = rospy.ServiceProxy('/compute_fk', GetPositionFK)
 
-        self.pub_co = rospy.Publisher('/'+current_robot_ns+'/collision_object',CollisionObject,queue_size=10)
+        self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=100)
 
-        sub_waypoint_status = rospy.Subscriber('/'+current_robot_ns+'/execute_trajectory/status', GoalStatusArray, self.waypoint_execution_cb)
-        sub_movegroup_status = rospy.Subscriber('/'+current_robot_ns+'/move_group/status', GoalStatusArray, self.move_group_execution_cb)
-        sub_movegroup_status = rospy.Subscriber('/'+current_robot_ns+'/move_group/status', GoalStatusArray, self.move_group_execution_cb)
-        rospy.Subscriber('/'+current_robot_ns+"/joint_states", JointState, self.further_ob_printing)
+        sub_waypoint_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.waypoint_execution_cb)
+        sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
+        sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
+        rospy.Subscriber("joint_states", JointState, self.further_ob_printing)
 
         # Initialize extruder
         print_request = rospy.ServiceProxy('/'+current_robot_ns+'/set_extruder_printing', SetBool)
@@ -62,10 +58,8 @@ class arm_base_control():
         
         # switch the extruder ON, control via set_extruder_rate
         msg_print = SetBoolRequest()
-        msg_print.data = True
+        msg_print.data=True
         print_request(msg_print)
-
-        self.msg_extrude = Float32()
     
         self.waypoint_execution_status = 0
         self.move_group_execution_status = 0
@@ -346,7 +340,7 @@ class arm_base_control():
 
     def move_group_execution_cb(self,msg):
         # Add current printing obstacle
-        if self.msg_extrude == 3.0:
+        if self.msg_print.data == True:
             current_ee_pose = self.group.get_current_pose().pose
             self.current_printing_pose = (current_ee_pose.position.x, current_ee_pose.position.y, current_ee_pose.position.z)
             if self.current_printing_pose and self.previous_printing_pose:
@@ -531,8 +525,7 @@ class arm_base_control():
                     execute_plan = plan
                     if success_num == len(point_list):
                         self.group.execute(execute_plan, wait=False)
-                        self.msg_extrude = 3.0
-                        self.extruder_publisher.publish(self.msg_extrude)
+                        self.msg_print.data = True
                         executing_state = 1
                         success_num += 1
 
@@ -542,8 +535,6 @@ class arm_base_control():
                     # execute success plan
                     self.msg_print.data = True
                     self.group.execute(execute_plan, wait=False)
-                    self.msg_extrude = 3.0
-                    self.extruder_publisher.publish(self.msg_extrude)
                     executing_state = 1
                     break
 
@@ -639,8 +630,7 @@ class arm_base_control():
                         self.rviz_visualise_marker(point_list[:executed_waypoint_index+1])
                         del(point_list[:executed_waypoint_index]) # delete up till whatever is executed
 
-            self.msg_extrude = 0.0
-            self.extruder_publisher.publish(self.msg_extrude)
+            self.msg_print.data = False
             self.group.stop()
             # Delete the points what already execute
             # if success_num > 0:
