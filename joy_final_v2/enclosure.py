@@ -21,10 +21,10 @@ class enclosure_demo:
         moveit_commander.roscpp_initialize(sys.argv)
         rospy.init_node('enclosure_demo')
 
-        control = arm_base_control()
+        control = arm_base_control('robot0')
 
-        sce = moveit_python.PlanningSceneInterface('odom')
-        sce.clear()
+        # sce = moveit_python.PlanningSceneInterface('odom')
+        # sce.clear()
 
         rospy.sleep(0.5)
         box_pose = geometry_msgs.msg.PoseStamped()
@@ -50,7 +50,7 @@ class enclosure_demo:
         # point_list_ob = scene.get_circle_point((2,2), 1, height = 0.05)
         # control.print_list_visualize(point_list)
         # control.print_list_visualize(point_list_0, name = 'future_ob')
-        control.print_pointlist(point_list)
+        control.print_pointlist(point_list, future_print_status = False)
 
         
         # # Happy ending

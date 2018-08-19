@@ -71,15 +71,15 @@ class arm_base_control:
     # Demo 1 scene
     def add_three_box_obstacle(self):
         ###Add obstacle
-        rospy.sleep(0.5)
-        box_pose = geometry_msgs.msg.PoseStamped()
-        box_pose.header.frame_id = "odom"
-        box_pose.pose.position.x = 0
-        box_pose.pose.position.y = 3
-        box_pose.pose.position.z = 0.01
-        box_name = "wall"
-        self.scene.add_box(box_name, box_pose, size=(2, 0.01, 0.01))
-        rospy.sleep(0.5)
+        # rospy.sleep(0.5)
+        # box_pose = geometry_msgs.msg.PoseStamped()
+        # box_pose.header.frame_id = "odom"
+        # box_pose.pose.position.x = 0
+        # box_pose.pose.position.y = 3
+        # box_pose.pose.position.z = 0.01
+        # box_name = "wall"
+        # self.scene.add_box(box_name, box_pose, size=(2, 0.01, 0.01))
+        # rospy.sleep(0.5)
 
         rospy.sleep(0.5)
         box_pose = geometry_msgs.msg.PoseStamped()

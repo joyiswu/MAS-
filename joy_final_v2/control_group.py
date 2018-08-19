@@ -48,18 +48,18 @@ class arm_base_control:
         self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=100)
 
         sub_waypoint_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.waypoint_execution_cb)
-        sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
-        sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
+        sub_movegroup_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.move_group_execution_cb)
+        # sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
         rospy.Subscriber("joint_states", JointState, self.further_ob_printing)
 
-        # Initialize extruder
-        print_request = rospy.ServiceProxy('/'+current_robot_ns+'/set_extruder_printing', SetBool)
-        self.extruder_publisher = rospy.Publisher('/'+current_robot_ns+'/set_extruder_rate',Float32,queue_size=20)
+        # # Initialize extruder
+        # print_request = rospy.ServiceProxy('/'+current_robot_ns+'/set_extruder_printing', SetBool)
+        # self.extruder_publisher = rospy.Publisher('/'+current_robot_ns+'/set_extruder_rate',Float32,queue_size=20)
         
         # switch the extruder ON, control via set_extruder_rate
         msg_print = SetBoolRequest()
         msg_print.data=True
-        print_request(msg_print)
+
     
         self.waypoint_execution_status = 0
         self.move_group_execution_status = 0
@@ -134,16 +134,6 @@ class arm_base_control:
     # Demo 1 scene
     def add_three_box_obstacle(self):
         ###Add obstacle
-        rospy.sleep(0.5)
-        box_pose = geometry_msgs.msg.PoseStamped()
-        box_pose.header.frame_id = "odom"
-        box_pose.pose.position.x = 0
-        box_pose.pose.position.y = 3
-        box_pose.pose.position.z = 0.01
-        box_name = "wall"
-        self.scene.add_box(box_name, box_pose, size=(2, 0.01, 0.01))
-        rospy.sleep(0.5)
-
         rospy.sleep(0.5)
         box_pose = geometry_msgs.msg.PoseStamped()
         box_pose.header.frame_id = "odom"
@@ -424,7 +414,7 @@ class arm_base_control:
 
         return waypoint_index
 
-    def print_pointlist(self, point_list, future_print_status = True):
+    def print_pointlist(self, point_list, future_print_status = False):
 
         # Save original points list
         full_point_list = copy.deepcopy(point_list)
@@ -552,6 +542,9 @@ class arm_base_control:
                 print 'status', self.waypoint_execution_status
 
                 while self.waypoint_execution_status != 3:
+
+                    if point_list == []: break
+                    
                     if self.waypoint_execution_status == 4:
                         # aborted state
                         print 'stop and abort waypoint execution'

@@ -14,9 +14,12 @@ from geometry_msgs.msg import *
 import moveit_python
 
 
-# There two obstacle move between (-1, 1) and (3, 1)
+
+# There two obstacle move between (-1,1) and (3, 1)
 if __name__ == '__main__':
     rospy.init_node('dynamic_obstacle')
+
+    # scene = moveit_python.PlanningSceneInterface()
 
     scene = moveit_python.PlanningSceneInterface('odom')
     scene.clear()
