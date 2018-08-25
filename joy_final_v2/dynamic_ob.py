@@ -42,8 +42,8 @@ if __name__ == '__main__':
 
         if box2_x >= 3:  direction_2 = -1
         if box2_x <= -1: direction_2 = 1
-        box1_x = box1_x + 0.01 * direction_1
-        box2_x = box2_x + 0.01 * direction_2
+        box1_x = box1_x + 0.006 * direction_1
+        box2_x = box2_x + 0.006 * direction_2
 
         scene.addBox('box_1',0.5,0.5,0.5, box1_x, box1_y,box1_z)
         scene.addBox('box_2',0.5,0.5,0.5, box2_x ,box2_y,box2_z)

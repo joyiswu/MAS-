@@ -13,7 +13,7 @@ import geometry_msgs.msg
 from geometry_msgs.msg import * 
 import moveit_python
 from obstacle_command import Scene_obstacle
-from control_test import arm_base_control
+from control_group import arm_base_control
 
 class enclosure_demo:
     def __init__(self):
@@ -21,10 +21,10 @@ class enclosure_demo:
         moveit_commander.roscpp_initialize(sys.argv)
         rospy.init_node('enclosure_demo')
 
-        control = arm_base_control('robot0')
+        control = arm_base_control()
 
-        # sce = moveit_python.PlanningSceneInterface('odom')
-        # sce.clear()
+        sce = moveit_python.PlanningSceneInterface('odom')
+        sce.clear()
 
         rospy.sleep(0.5)
         box_pose = geometry_msgs.msg.PoseStamped()
@@ -40,17 +40,23 @@ class enclosure_demo:
         rospy.sleep(1)
 
         point_list = []
-        point_list += control.straight_line_sample((-1,1), (2,1))
+        point_list += control.straight_line_sample((0,1), (2,1))
         point_list += control.straight_line_sample((2,1), (2,3))
-        point_list += control.straight_line_sample((1,3), (0,3))
-        point_list += control.straight_line_sample((0,3), (0,1))
+        point_list += control.straight_line_sample((2,3), (0,3))
+        point_list += control.straight_line_sample((0,3), (0,2.6))
+
+        point_list_0 = control.straight_line_sample((0,2.6), (0,1))
 
 
+        control.group.set_position_target([1, 2, 0.1], control.group.get_end_effector_link())
 
-        # point_list_ob = scene.get_circle_point((2,2), 1, height = 0.05)
-        # control.print_list_visualize(point_list)
+        control.group.go(wait = True)
+
+        control.print_list_visualize(point_list)
+
         # control.print_list_visualize(point_list_0, name = 'future_ob')
-        control.print_pointlist(point_list, future_print_status = False)
+        control.print_pointlist(point_list_0, future_print_status = True)
+
 
         
         # # Happy ending

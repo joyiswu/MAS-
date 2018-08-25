@@ -10,7 +10,7 @@ from moveit_msgs.srv import GetPositionIK, GetPositionFK
 from moveit_msgs.msg import PositionIKRequest, CollisionObject
 from shape_msgs.msg import SolidPrimitive, Plane, Mesh, MeshTriangle
 from std_srvs.srv import SetBool, SetBoolResponse, SetBoolRequest
-from std_msgs.msg import Float32, String
+from std_msgs.msg import Float32
 import geometry_msgs.msg
 from geometry_msgs.msg import *
 import tf2_ros
@@ -25,41 +25,45 @@ from visualization_msgs.msg import Marker
 import re
 import matplotlib.pyplot as plt
 import datetime
-import os
-import pandas as pd
-from plot import save_data 
-
 
 class arm_base_control:
     def __init__(self):
 
         moveit_commander.roscpp_initialize(sys.argv)
 
-        self.robot = moveit_commander.RobotCommander()
+        current_robot_ns = 'robot1'
+
+        self.robot = moveit_commander.RobotCommander(current_robot_ns+'/robot_description',current_robot_ns)
 
         # Init moveit group
-        self.group = moveit_commander.MoveGroupCommander('robot')
-        self.arm_group = moveit_commander.MoveGroupCommander('arm')
-        self.base_group = moveit_commander.MoveGroupCommander('base')
+        self.group = moveit_commander.MoveGroupCommander('robot', current_robot_ns+'/robot_description',current_robot_ns)
+        self.arm_group = moveit_commander.MoveGroupCommander('arm',current_robot_ns+'/robot_description',current_robot_ns)
+        self.base_group = moveit_commander.MoveGroupCommander('base', current_robot_ns+'/robot_description',current_robot_ns)
 
         self.scene = moveit_commander.PlanningSceneInterface()
 
-        self.sce = moveit_python.PlanningSceneInterface('odom')
-        self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=100)
+        self.sce = moveit_python.PlanningSceneInterface('odom', current_robot_ns)
+        self.pub_co = rospy.Publisher('/'+current_robot_ns+'/collision_object', CollisionObject, queue_size=100)
 
         self.msg_print = SetBoolRequest()
 
-        self.request_fk = rospy.ServiceProxy('/compute_fk', GetPositionFK)
+        self.request_fk = rospy.ServiceProxy('/'+current_robot_ns+'/compute_fk', GetPositionFK)
 
-        self.pub_co = rospy.Publisher('collision_object', CollisionObject, queue_size=100)
+        self.pub_co = rospy.Publisher('/'+current_robot_ns+'/collision_object',CollisionObject,queue_size=10)
 
-        sub_waypoint_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.waypoint_execution_cb)
-        sub_movegroup_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.move_group_execution_cb)
-        # sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
-        rospy.Subscriber("joint_states", JointState, self.further_ob_printing)
+        sub_waypoint_status = rospy.Subscriber('/'+current_robot_ns+'/execute_trajectory/status', GoalStatusArray, self.waypoint_execution_cb)
+        sub_movegroup_status = rospy.Subscriber('/'+current_robot_ns+'/move_group/status', GoalStatusArray, self.move_group_execution_cb)
+        rospy.Subscriber('/'+current_robot_ns+"/joint_states", JointState, self.further_ob_printing)
 
+        # Initialize extruder
+        print_request = rospy.ServiceProxy('/'+current_robot_ns+'/set_extruder_printing', SetBool)
+        self.extruder_publisher = rospy.Publisher('/'+current_robot_ns+'/set_extruder_rate',Float32,queue_size=20)
+        
+        # switch the extruder ON, control via set_extruder_rate
         msg_print = SetBoolRequest()
         msg_print.data=True
+
+        print_request(msg_print)
 
         self.re_position_x = []
         self.re_position_y = [] 
@@ -91,25 +95,10 @@ class arm_base_control:
 
         # Initialize extruder
 
-        extruder_publisher = rospy.Publisher('set_extruder_rate',
-                                             Float32,
-                                             queue_size=20)
         msg_extrude = Float32()
-        msg_extrude = 5.0
-        extruder_publisher.publish(msg_extrude)
+        msg_extrude = 0
+        self.extruder_publisher.publish(msg_extrude)
 
-
-#########################################################
-        self.experiment = rospy.Publisher('experiment_name',
-                             String,
-                             queue_size=20)
-
-
-######################################################
-
-        self.pub_rviz_marker = rospy.Publisher('/visualization_marker', Marker, queue_size=100)
-        self.remove_all_rviz_marker()
-        self.printing_number_rviz = 0
 
     def remove_all_rviz_marker(self):
         marker = Marker()
@@ -181,20 +170,6 @@ class arm_base_control:
         box_pose.pose.position.z = 0.2
         box_three = "box_3"
         self.scene.add_box(box_three, box_pose, size=(0.5, 0.5, 0.5))
-        rospy.sleep(0.5)
-
-    def add_ground(self):
-        ###Add obstacle
-        rospy.sleep(0.5)
-        box_pose = geometry_msgs.msg.PoseStamped()
-        box_pose.header.frame_id = "odom"
-        box_pose.pose.position.x = 0
-        box_pose.pose.position.y = 0
-        box_pose.pose.position.z = -0.1
-        box_one = "box_1"
-        self.sce.setColor(box_one, 0, 0, 255)
-        self.sce.sendColors()
-        self.scene.add_box(box_one, box_pose, size=(10, 10, 0.02))
         rospy.sleep(0.5)
 
     def make_box(self, name, pose, size = (0.5, 0.5, 0.5)):
@@ -476,7 +451,7 @@ class arm_base_control:
     def check_executed_waypoint_index(self, success_planned_waypoints, current_ee_position):
         found_status = 0
         waypoint_index = len(success_planned_waypoints) -1
-        epsilon = 1e-6
+        epsilon = 1e-2
         # both input arguments are in np.array format, 2 dimensions only (x,y axis)
         for waypoint_index in range(len(success_planned_waypoints)-1):
             previous_waypoint = success_planned_waypoints[waypoint_index]
@@ -508,11 +483,7 @@ class arm_base_control:
 
         return waypoint_index
 
-    def print_pointlist(self, point_list, future_print_status = False, name = None):
-
-        msg_experiment = String()
-        msg_experiment = name
-        self.experiment.publish(msg_experiment)
+    def print_pointlist(self, point_list, future_print_status = False):
 
         startime = datetime.datetime.now()
 
@@ -564,7 +535,6 @@ class arm_base_control:
         finsih_num = 0
         print_num = 0
         index_check = 0
-
         while len(point_list) > 0:
 
             print('New Plan, points left:', len(point_list))
@@ -620,6 +590,9 @@ class arm_base_control:
                     if success_num == len(point_list):
                         self.group.execute(execute_plan, wait=False)
                         self.msg_print.data = True
+                        msg_extrude = Float32()
+                        msg_extrude = 3.0
+                        self.extruder_publisher.publish(msg_extrude)
                         executing_state = 1
                         success_num += 1
 
@@ -629,6 +602,9 @@ class arm_base_control:
                     # execute success plan
                     self.msg_print.data = True
                     self.group.execute(execute_plan, wait=False)
+                    msg_extrude = Float32()
+                    msg_extrude = 3.0
+                    self.extruder_publisher.publish(msg_extrude)
                     executing_state = 1
                     break
             plan_end_time = datetime.datetime.now()
@@ -637,8 +613,7 @@ class arm_base_control:
 
             ## 2nd loop
             ## always re-plan and check for obstacle while executing waypoints
-            repeat_check = 0
-            previous_index = 0
+
             if future_print_status == True:
 
                 # Check for enclosure
@@ -686,15 +661,11 @@ class arm_base_control:
                                                           current_ee_pose.position.y])
 
                     executed_waypoint_index = max(self.check_executed_waypoint_index(success_planned_waypoint_array, current_ee_position_array), executed_waypoint_index)
-                    if executed_waypoint_index == previous_index: repeat_check += 1
-                    previous_index = executed_waypoint_index
-
-                    if repeat_check >= 20: break
                     # print 'executed latest index', executed_waypoint_index
 
                     index_check = max(self.check_executed_waypoint_index(full_point_array, current_ee_position_array), index_check)
                     self.further_printing_number = index_check
-                    print 'index:', index_check, 'way_point index', executed_waypoint_index
+                    print 'index:', index_check, 'way_point index', executed_waypoint_index, (current_ee_pose.position.x,current_ee_pose.position.y)
 
                     if future_print_status == True:
 
@@ -762,6 +733,9 @@ class arm_base_control:
                         del(point_list[:executed_waypoint_index]) # delete up till whatever is executed
 
             self.msg_print.data = False
+            msg_extrude = Float32()
+            msg_extrude = 0
+            self.extruder_publisher.publish(msg_extrude)
             
             if point_list == []: rospy.sleep(2)
             self.group.stop()
@@ -780,21 +754,6 @@ class arm_base_control:
         print('Travel time:', (finshtime-startime).seconds - self.printing_time - self.planning_time)
         print('number of printing:', number_printing_part)
 
-        # Tell plot node save data
-        msg_experiment = String()
-        msg_experiment = 'Finish'
-        self.experiment.publish(msg_experiment)
-
-        # Save result to csv
-        list_result=[[(finshtime-startime).seconds, self.printing_time, self.planning_time, 
-        (finshtime-startime).seconds - self.printing_time - self.planning_time, number_printing_part]]
-
-        result_name = ['All time', 'Printing time', 'planning time', 'Travel time', 'number of printing']
-
-        result_data = pd.DataFrame(columns = result_name,data=list_result)
-
-
-        # Plot Result
         full_point_list_x = [base[0] for base in full_point_list]
         full_point_list_y = [base[1] for base in full_point_list]
 
@@ -809,13 +768,7 @@ class arm_base_control:
         plt.ylabel("y axis (m)")
         plt.title('Printing result')
 
-        # Save printing path
-        printing_result_list = [full_point_list_x, full_point_list_y, self.re_position_x, self.re_position_y]
-        printing_data = pd.DataFrame(data=printing_result_list)
-        # Save result plot
-        if name:
-            plt3.savefig('experiment_data/' + str(name) + '/' + str(name) + '_result.png', dpi=plt3.dpi)
-            result_data.to_csv('experiment_data/' + str(name) + '/' + str(name) +'_result.csv',encoding='gbk')
-            printing_data.to_csv('experiment_data/' + str(name) + '/' + str(name) +'_printpath.csv',encoding='gbk')
-        print('All finish')
+        plt.show()
+        plt3.savefig('result.png', dpi=plt3.dpi)
 
+        print('All finish, time:', (finshtime-startime).seconds)

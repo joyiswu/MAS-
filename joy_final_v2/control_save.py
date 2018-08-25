@@ -10,7 +10,7 @@ from moveit_msgs.srv import GetPositionIK, GetPositionFK
 from moveit_msgs.msg import PositionIKRequest, CollisionObject
 from shape_msgs.msg import SolidPrimitive, Plane, Mesh, MeshTriangle
 from std_srvs.srv import SetBool, SetBoolResponse, SetBoolRequest
-from std_msgs.msg import Float32, String
+from std_msgs.msg import Float32
 import geometry_msgs.msg
 from geometry_msgs.msg import *
 import tf2_ros
@@ -27,11 +27,10 @@ import matplotlib.pyplot as plt
 import datetime
 import os
 import pandas as pd
-from plot import save_data 
 
 
 class arm_base_control:
-    def __init__(self):
+    def __init__(self, name = None):
 
         moveit_commander.roscpp_initialize(sys.argv)
 
@@ -58,6 +57,26 @@ class arm_base_control:
         # sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
         rospy.Subscriber("joint_states", JointState, self.further_ob_printing)
 
+#########################################################################
+        rospy.Subscriber("/joint_states", JointState, self.joint_callback)
+        rospy.Subscriber("/joint_states", JointState, self.eef_callback)
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+        self.base_position_x = []
+        self.base_position_y = []
+        self.base_position_z = []
+        self.eef_position_x = []
+        self.eef_position_y = []
+        self.eef_position_z = []
+        self.position_time = []
+        self.name = name  
+        self.js_0 = []
+        self.js_1 = []
+        self.js_2 = []
+        self.js_time = []
+        self.startime = datetime.datetime.now()
+        self.mkdir('experiment_data' + '/' + name)
+#############################################################################
         msg_print = SetBoolRequest()
         msg_print.data=True
 
@@ -97,19 +116,107 @@ class arm_base_control:
         msg_extrude = Float32()
         msg_extrude = 5.0
         extruder_publisher.publish(msg_extrude)
-
-
-#########################################################
-        self.experiment = rospy.Publisher('experiment_name',
-                             String,
-                             queue_size=20)
-
-
-######################################################
-
         self.pub_rviz_marker = rospy.Publisher('/visualization_marker', Marker, queue_size=100)
         self.remove_all_rviz_marker()
         self.printing_number_rviz = 0
+
+    def save_date(self):
+
+        plt2 = plt.figure(self.name + "EEf path", figsize=(6, 6))
+        plt.plot(self.eef_position_x ,self.eef_position_y, '-bo',linewidth = 1, markersize = 3)
+        plt.plot(self.base_position_x ,self.base_position_y, '-yo',linewidth = 1, markersize = 3)
+        plt.plot(self.eef_position_x[0] ,self.eef_position_y[0], 'ro', markersize = 8)
+        plt.plot(self.eef_position_x[-1] ,self.eef_position_y[-1], 'go', markersize = 8)
+        x_min = min(min(self.eef_position_x), min(self.base_position_x))
+        x_max = max(max(self.eef_position_x), max(self.base_position_x))
+        y_min = min(min(self.eef_position_y), min(self.base_position_y))
+        y_max = max(max(self.eef_position_y), max(self.base_position_y))
+        plt.xlim(x_min - 1, x_max + 1)
+        plt.ylim(y_min - 1, y_max + 1)
+        plt.legend(['EEF Trajactory', 'Base Trajactory', 'Starting point', 'Ending point'], fontsize=12, bbox_to_anchor=(1.0, 1))
+        plt.title('Path')
+        plt.xlabel("X axis (m)")
+        plt.ylabel("y axis (m)")
+
+        fun_sub = lambda a, b: a - b
+        speed_j0 = [0] + list(map(fun_sub, self.js_0[1:], self.js_0[0:-1]))
+        speed_j1 = [0] + list(map(fun_sub, self.js_1[1:], self.js_1[0:-1]))
+        speed_j2 = [0] + list(map(fun_sub, self.js_2[1:], self.js_2[0:-1]))
+
+        plt3 = plt.figure(self.name + "Base joint state", figsize=(10, 6))
+        plt.plot(self.js_time[0:len(speed_j0)], speed_j0, 'b', linewidth = 0.5)
+        plt.plot(self.js_time[0:len(speed_j1)], speed_j1, 'r', linewidth = 0.5)
+        plt.plot(self.js_time[0:len(speed_j2)], speed_j2, 'g', linewidth = 0.5)
+        plt.xlim(0, max(self.js_time) + 1)
+        plt.legend(['Joint 0', 'Joint 1', 'Joint 2'], fontsize=8, bbox_to_anchor=(1.0, 1))
+        plt.title('Base Joint speed')
+        plt.xlabel("Time from start (sec)")
+        plt.ylabel("Joint_state speed (m/s)")
+
+        # plt.show()
+
+        # plt1.savefig(self.name + 'base.png', dpi=plt1.dpi)
+        plt2.savefig('experiment_data/' + str(self.name) + '/' + self.name +'_path.png', dpi=plt2.dpi)
+        plt3.savefig('experiment_data/' + str(self.name) + '/' + self.name + '_joint_state.png', dpi=plt3.dpi)
+
+        print(len(self.eef_position_x), len(self.js_time), len(self.js_0))
+
+        list_position=[self.position_time,
+                        self.base_position_x,
+                        self.base_position_y,
+                        self.base_position_z,
+                        self.eef_position_x,
+                        self.eef_position_y,
+                        self.eef_position_z]
+
+        position_data = pd.DataFrame(data=list_position)
+        position_data.to_csv('experiment_data/' + str(self.name) + '/' + self.name +'_position.csv',encoding='gbk')
+
+        list_cmd_v=[self.js_time[0:len(speed_j0)], speed_j0, speed_j1, speed_j2]
+
+        cmd_v_data = pd.DataFrame(data=list_cmd_v)
+        cmd_v_data.to_csv('experiment_data/' + str(self.name) + '/' + self.name +'_cmd_v.csv',encoding='gbk')
+
+    def joint_callback(self, data):
+
+        rospy.sleep(0.5)
+        try:
+            base_record = self.tf_buffer.lookup_transform('odom','base_link', rospy.Time.now(), rospy.Duration(0.1))
+            eef_record = self.tf_buffer.lookup_transform('odom','arm_link_ee', rospy.Time.now(), rospy.Duration(0.1))
+
+            # print round(eef_record.transform.translation.x, 4), round(eef_record.transform.translation.y, 4)
+            self.base_position_x.append(round(base_record.transform.translation.x, 4))
+            self.base_position_y.append(round(base_record.transform.translation.y, 4))
+            self.base_position_z.append(round(base_record.transform.translation.z, 4))
+            self.eef_position_x.append(round(eef_record.transform.translation.x, 4))
+            self.eef_position_y.append(round(eef_record.transform.translation.y, 4))
+            self.eef_position_z.append(round(eef_record.transform.translation.z, 4))
+            self.position_time .append(rospy.Time.now())
+
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            rospy.sleep(0.1)
+
+    def eef_callback(self, data):
+
+        finshtime = datetime.datetime.now()
+
+        self.js_0.append(data.position[0])
+        self.js_1.append(data.position[1])
+        self.js_2.append(data.position[2])
+        self.js_time.append((finshtime-self.startime).seconds)
+
+    def mkdir(self, path):
+     
+        folder = os.path.exists(path)
+     
+        if not folder:                  
+            os.makedirs(path)          
+            print "---  new folder...  ---"
+            print "---  OK  ---"
+     
+        else:
+            print "---  There is this folder!  ---"
+
 
     def remove_all_rviz_marker(self):
         marker = Marker()
@@ -508,11 +615,7 @@ class arm_base_control:
 
         return waypoint_index
 
-    def print_pointlist(self, point_list, future_print_status = False, name = None):
-
-        msg_experiment = String()
-        msg_experiment = name
-        self.experiment.publish(msg_experiment)
+    def print_pointlist(self, point_list, future_print_status = False):
 
         startime = datetime.datetime.now()
 
@@ -564,7 +667,6 @@ class arm_base_control:
         finsih_num = 0
         print_num = 0
         index_check = 0
-
         while len(point_list) > 0:
 
             print('New Plan, points left:', len(point_list))
@@ -637,8 +739,7 @@ class arm_base_control:
 
             ## 2nd loop
             ## always re-plan and check for obstacle while executing waypoints
-            repeat_check = 0
-            previous_index = 0
+
             if future_print_status == True:
 
                 # Check for enclosure
@@ -686,10 +787,6 @@ class arm_base_control:
                                                           current_ee_pose.position.y])
 
                     executed_waypoint_index = max(self.check_executed_waypoint_index(success_planned_waypoint_array, current_ee_position_array), executed_waypoint_index)
-                    if executed_waypoint_index == previous_index: repeat_check += 1
-                    previous_index = executed_waypoint_index
-
-                    if repeat_check >= 20: break
                     # print 'executed latest index', executed_waypoint_index
 
                     index_check = max(self.check_executed_waypoint_index(full_point_array, current_ee_position_array), index_check)
@@ -780,21 +877,6 @@ class arm_base_control:
         print('Travel time:', (finshtime-startime).seconds - self.printing_time - self.planning_time)
         print('number of printing:', number_printing_part)
 
-        # Tell plot node save data
-        msg_experiment = String()
-        msg_experiment = 'Finish'
-        self.experiment.publish(msg_experiment)
-
-        # Save result to csv
-        list_result=[[(finshtime-startime).seconds, self.printing_time, self.planning_time, 
-        (finshtime-startime).seconds - self.printing_time - self.planning_time, number_printing_part]]
-
-        result_name = ['All time', 'Printing time', 'planning time', 'Travel time', 'number of printing']
-
-        result_data = pd.DataFrame(columns = result_name,data=list_result)
-
-
-        # Plot Result
         full_point_list_x = [base[0] for base in full_point_list]
         full_point_list_y = [base[1] for base in full_point_list]
 
@@ -809,13 +891,132 @@ class arm_base_control:
         plt.ylabel("y axis (m)")
         plt.title('Printing result')
 
-        # Save printing path
-        printing_result_list = [full_point_list_x, full_point_list_y, self.re_position_x, self.re_position_y]
-        printing_data = pd.DataFrame(data=printing_result_list)
-        # Save result plot
-        if name:
-            plt3.savefig('experiment_data/' + str(name) + '/' + str(name) + '_result.png', dpi=plt3.dpi)
-            result_data.to_csv('experiment_data/' + str(name) + '/' + str(name) +'_result.csv',encoding='gbk')
-            printing_data.to_csv('experiment_data/' + str(name) + '/' + str(name) +'_printpath.csv',encoding='gbk')
+        plt3.savefig('experiment_data/' + str(self.name) + '/' + self.name + '_result.png', dpi=plt3.dpi)
+        self.save_date()
         print('All finish')
 
+class save_data:
+    def __init__(self, name):
+    # Initialize moveit_commander and rospy node 
+
+        rospy.Subscriber("/joint_states", JointState, self.joint_callback)
+
+        rospy.Subscriber("/joint_states", JointState, self.callback)
+
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+
+        self.base_position_x = []
+        self.base_position_y = []
+        self.base_position_z = []
+        self.eef_position_x = []
+        self.eef_position_y = []
+        self.eef_position_z = []
+        self.position_time = []
+        self.name = name  
+
+        self.js_0 = []
+        self.js_1 = []
+        self.js_2 = []
+        self.js_time = []
+
+
+        self.startime = datetime.datetime.now()
+
+        self.mkdir('experiment_data' + '/' + name)
+
+    def save_date(self):
+
+        plt2 = plt.figure(self.name + "EEf path", figsize=(6, 6))
+        plt.plot(self.eef_position_x ,self.eef_position_y, '-bo',linewidth = 1, markersize = 3)
+        plt.plot(self.base_position_x ,self.base_position_y, '-yo',linewidth = 1, markersize = 3)
+        plt.plot(self.eef_position_x[0] ,self.eef_position_y[0], 'ro', markersize = 8)
+        plt.plot(self.eef_position_x[-1] ,self.eef_position_y[-1], 'go', markersize = 8)
+        x_min = min(min(self.eef_position_x), min(self.base_position_x))
+        x_max = max(max(self.eef_position_x), max(self.base_position_x))
+        y_min = min(min(self.eef_position_y), min(self.base_position_y))
+        y_max = max(max(self.eef_position_y), max(self.base_position_y))
+        plt.xlim(x_min - 1, x_max + 1)
+        plt.ylim(y_min - 1, y_max + 1)
+        plt.legend(['EEF Trajactory', 'Base Trajactory', 'Starting point', 'Ending point'], fontsize=12, bbox_to_anchor=(1.0, 1))
+        plt.title('Path')
+        plt.xlabel("X axis (m)")
+        plt.ylabel("y axis (m)")
+
+        fun_sub = lambda a, b: a - b
+        speed_j0 = [0] + list(map(fun_sub, self.js_0[1:], self.js_0[0:-1]))
+        speed_j1 = [0] + list(map(fun_sub, self.js_1[1:], self.js_1[0:-1]))
+        speed_j2 = [0] + list(map(fun_sub, self.js_2[1:], self.js_2[0:-1]))
+
+        plt3 = plt.figure(self.name + "Base joint state", figsize=(10, 6))
+        plt.plot(self.js_time[0:len(speed_j0)], speed_j0, 'b', linewidth = 0.5)
+        plt.plot(self.js_time[0:len(speed_j1)], speed_j1, 'r', linewidth = 0.5)
+        plt.plot(self.js_time[0:len(speed_j2)], speed_j2, 'g', linewidth = 0.5)
+        plt.xlim(0, max(self.js_time) + 1)
+        plt.legend(['Joint 0', 'Joint 1', 'Joint 2'], fontsize=8, bbox_to_anchor=(1.0, 1))
+        plt.title('Base Joint speed')
+        plt.xlabel("Time from start (sec)")
+        plt.ylabel("Joint_state speed (m/s)")
+
+        # plt.show()
+
+        # plt1.savefig(self.name + 'base.png', dpi=plt1.dpi)
+        plt2.savefig('experiment_data/' + str(self.name) + '/' + self.name +'_path.png', dpi=plt2.dpi)
+        plt3.savefig('experiment_data/' + str(self.name) + '/' + self.name + '_joint_state.png', dpi=plt3.dpi)
+
+        print(len(self.eef_position_x), len(self.js_time), len(self.js_0))
+
+        list_position=[self.position_time,
+                        self.base_position_x,
+                        self.base_position_y,
+                        self.base_position_z,
+                        self.eef_position_x,
+                        self.eef_position_y,
+                        self.eef_position_z]
+
+        position_data = pd.DataFrame(data=list_position)
+        position_data.to_csv('experiment_data/' + str(self.name) + '/' + self.name +'_position.csv',encoding='gbk')
+
+        list_cmd_v=[self.js_time[0:len(speed_j0)], speed_j0, speed_j1, speed_j2]
+
+        cmd_v_data = pd.DataFrame(data=list_cmd_v)
+        cmd_v_data.to_csv('experiment_data/' + str(self.name) + '/' + self.name +'_cmd_v.csv',encoding='gbk')
+
+    def joint_callback(self, data):
+
+        try:
+            base_record = self.tf_buffer.lookup_transform('odom','base_link', rospy.Time.now(), rospy.Duration(0.1))
+            eef_record = self.tf_buffer.lookup_transform('odom','arm_link_ee', rospy.Time.now(), rospy.Duration(0.1))
+
+            # print round(eef_record.transform.translation.x, 4), round(eef_record.transform.translation.y, 4)
+            self.base_position_x.append(round(base_record.transform.translation.x, 4))
+            self.base_position_y.append(round(base_record.transform.translation.y, 4))
+            self.base_position_z.append(round(base_record.transform.translation.z, 4))
+            self.eef_position_x.append(round(eef_record.transform.translation.x, 4))
+            self.eef_position_y.append(round(eef_record.transform.translation.y, 4))
+            self.eef_position_z.append(round(eef_record.transform.translation.z, 4))
+            self.position_time .append(rospy.Time.now())
+
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            rospy.sleep(0.1)
+
+    def callback(self, data):
+
+        finshtime = datetime.datetime.now()
+
+        self.js_0.append(data.position[0])
+        self.js_1.append(data.position[1])
+        self.js_2.append(data.position[2])
+        self.js_time.append((finshtime-self.startime).seconds)
+
+    def mkdir(self, path):
+     
+        folder = os.path.exists(path)
+     
+        if not folder:                  
+            os.makedirs(path)          
+            print "---  new folder...  ---"
+            print "---  OK  ---"
+     
+        else:
+            print "---  There is this folder!  ---"

@@ -10,7 +10,7 @@ from moveit_msgs.srv import GetPositionIK, GetPositionFK
 from moveit_msgs.msg import PositionIKRequest, CollisionObject
 from shape_msgs.msg import SolidPrimitive, Plane, Mesh, MeshTriangle
 from std_srvs.srv import SetBool, SetBoolResponse, SetBoolRequest
-from std_msgs.msg import Float32, String
+from std_msgs.msg import Float32
 import geometry_msgs.msg
 from geometry_msgs.msg import *
 import tf2_ros
@@ -25,10 +25,6 @@ from visualization_msgs.msg import Marker
 import re
 import matplotlib.pyplot as plt
 import datetime
-import os
-import pandas as pd
-from plot import save_data 
-
 
 class arm_base_control:
     def __init__(self):
@@ -57,7 +53,13 @@ class arm_base_control:
         sub_movegroup_status = rospy.Subscriber('execute_trajectory/status', GoalStatusArray, self.move_group_execution_cb)
         # sub_movegroup_status = rospy.Subscriber('move_group/status', GoalStatusArray, self.move_group_execution_cb)
         rospy.Subscriber("joint_states", JointState, self.further_ob_printing)
+        # rospy.Subscriber("/joint_states", JointState, self.joint_callback)
 
+        # # Initialize extruder
+        # print_request = rospy.ServiceProxy('/'+current_robot_ns+'/set_extruder_printing', SetBool)
+        # self.extruder_publisher = rospy.Publisher('/'+current_robot_ns+'/set_extruder_rate',Float32,queue_size=20)
+        
+        # switch the extruder ON, control via set_extruder_rate
         msg_print = SetBoolRequest()
         msg_print.data=True
 
@@ -84,11 +86,6 @@ class arm_base_control:
         self.group.allow_replanning(1)
         self.group.set_planning_time(10)
 
-        # Initialize time record
-        self.travel_time = 0
-        self.planning_time = 0
-        self.printing_time = 0
-
         # Initialize extruder
 
         extruder_publisher = rospy.Publisher('set_extruder_rate',
@@ -97,19 +94,19 @@ class arm_base_control:
         msg_extrude = Float32()
         msg_extrude = 5.0
         extruder_publisher.publish(msg_extrude)
-
-
-#########################################################
-        self.experiment = rospy.Publisher('experiment_name',
-                             String,
-                             queue_size=20)
-
-
-######################################################
-
         self.pub_rviz_marker = rospy.Publisher('/visualization_marker', Marker, queue_size=100)
         self.remove_all_rviz_marker()
         self.printing_number_rviz = 0
+
+    # def joint_callback(self, data):
+
+    #     current_ee_pose = self.group.get_current_pose().pose
+    #     current_base_pose = self.base_group.get_current_pose().pose
+
+    #     self.base_position_x.append(round(current_base_pose.position.x, 4))
+    #     self.base_position_y.append(round(current_base_pose.position.y, 4))
+    #     self.eef_position_x.append(round(current_ee_pose.position.x, 4))
+    #     self.eef_position_y.append(round(current_ee_pose.position.y, 4))
 
     def remove_all_rviz_marker(self):
         marker = Marker()
@@ -181,20 +178,6 @@ class arm_base_control:
         box_pose.pose.position.z = 0.2
         box_three = "box_3"
         self.scene.add_box(box_three, box_pose, size=(0.5, 0.5, 0.5))
-        rospy.sleep(0.5)
-
-    def add_ground(self):
-        ###Add obstacle
-        rospy.sleep(0.5)
-        box_pose = geometry_msgs.msg.PoseStamped()
-        box_pose.header.frame_id = "odom"
-        box_pose.pose.position.x = 0
-        box_pose.pose.position.y = 0
-        box_pose.pose.position.z = -0.1
-        box_one = "box_1"
-        self.sce.setColor(box_one, 0, 0, 255)
-        self.sce.sendColors()
-        self.scene.add_box(box_one, box_pose, size=(10, 10, 0.02))
         rospy.sleep(0.5)
 
     def make_box(self, name, pose, size = (0.5, 0.5, 0.5)):
@@ -281,14 +264,12 @@ class arm_base_control:
         self._further_printing_number += 1
         if self._further_printing_number == 5: self._further_printing_number = 0
         box_name = 'future_point' + str(self._further_printing_number)
-        self.sce.setColor(box_name, 255, 0, 0)
-        self.sce.sendColors()
         self.pub_co.publish(self.make_box(box_name, box_pose, size=(length, 0.01, 0.01)))
 
 
         rospy.sleep(0.05)
 
-    def print_future_visualize(self, way_points, index, step = 3, length = 10, status = True, point_num = 1):
+    def print_future_visualize(self, way_points, index, step = 8, length = 5, status = True, point_num = 1):
 
         # There is no future obstacle here
         if status == False:
@@ -387,7 +368,7 @@ class arm_base_control:
             future_printing_already = False
 
             for point_name in current_future_ob_list:
-                result = re.match('future_point', point_name)
+                result = re.match('future_ob', point_name)
                 if result:
                     future_printing_already = True
                     break
@@ -406,60 +387,6 @@ class arm_base_control:
                     status = future_printing_already, 
                     point_num = self.further_printing_number - self.pre_further_printing_number)
             self.pre_further_printing_number = self.further_printing_number
-
-    def enclosure(self, start_position):
-        times = 0
-        while not rospy.is_shutdown():
-            # Check for enclosure
-            rospy.sleep(0.05)
-            self.base_group.set_position_target((0, 0, 0.05), self.base_group.get_end_effector_link())
-            result = self.base_group.plan()
-            self.base_group.clear_pose_targets()
-            times += 1
-            if len(result.joint_trajectory.points) == 0: 
-                print('Check enclosure failed, times:', times)
-
-                # Remove future obstacle
-                current_future_ob_list = self.sce.getKnownCollisionObjects()
-
-                for point_name in current_future_ob_list:
-                    result = re.match('future_point', point_name)
-                    if result: 
-                        self.sce.removeCollisionObject(point_name)
-                rospy.sleep(0.05)
-
-                
-                random_pose = self.group.get_current_pose(self.group.get_end_effector_link())
-
-                (roll, pitch, yaw) = euler_from_quaternion([random_pose.pose.orientation.x,
-                                                            random_pose.pose.orientation.y,
-                                                            random_pose.pose.orientation.z,
-                                                            random_pose.pose.orientation.w])
-
-                [random_pose.pose.orientation.x, \
-                 random_pose.pose.orientation.y, \
-                 random_pose.pose.orientation.z, \
-                 random_pose.pose.orientation.w] = quaternion_from_euler(roll, pitch, yaw - pi/4 * times)
-
-                (random_pose.pose.position.x, random_pose.pose.position.y, random_pose.pose.position.z) = start_position
-                self.group.set_pose_target(random_pose)
-                self.group.go(wait = True)
-
-                self.group.clear_pose_targets()
-                # control.group.set_position_target([0, 2, 0.1], control.group.get_end_effector_link())
-
-                # control.group.go(wait = True)
-                self.print_future_visualize(
-                    self.target_list, 
-                    self.further_printing_number, 
-                    status = False)
-                rospy.sleep(0.1)
-
-
-            else: 
-                print('Check enclosure successful, times:', times)
-                self.future_printing_status = True
-                break
 
     def move_to_initial(self, goal):
 
@@ -508,16 +435,10 @@ class arm_base_control:
 
         return waypoint_index
 
-    def print_pointlist(self, point_list, future_print_status = False, name = None):
-
-        msg_experiment = String()
-        msg_experiment = name
-        self.experiment.publish(msg_experiment)
+    def print_pointlist(self, point_list, future_print_status = False):
 
         startime = datetime.datetime.now()
 
-        # Record number of print part
-        number_printing_part = 0
         # Save original points list
         full_point_list = copy.deepcopy(point_list)
 
@@ -564,10 +485,9 @@ class arm_base_control:
         finsih_num = 0
         print_num = 0
         index_check = 0
-
         while len(point_list) > 0:
 
-            print('New Plan, points left:', len(point_list))
+            print('New Plan, points left:', len(point_list), point_list)
 
             # Move the robot point to first point and find the height
             if len(point_list) > 1:
@@ -591,9 +511,8 @@ class arm_base_control:
             self.group.set_pose_target(current_pose)
             self.group.go()
 
+            # Move the robot to the center of the striaght line to make sure Way point method can be executed
             # Way points
-
-            plan_start_time = datetime.datetime.now()
             waypoints = []
             wpose = self.group.get_current_pose().pose
             # Add the current pose to make sure the path is smooth
@@ -631,31 +550,9 @@ class arm_base_control:
                     self.group.execute(execute_plan, wait=False)
                     executing_state = 1
                     break
-            plan_end_time = datetime.datetime.now()
-            print'first planing point time is', (plan_end_time - plan_start_time).seconds      
-            self.planning_time += max((plan_end_time - plan_start_time).seconds, 1)
 
             ## 2nd loop
             ## always re-plan and check for obstacle while executing waypoints
-            repeat_check = 0
-            previous_index = 0
-            if future_print_status == True:
-
-                # Check for enclosure
-                self.base_group.set_position_target([0, 0, 0.05], self.base_group.get_end_effector_link())
-                result = self.base_group.plan()
-                self.base_group.clear_pose_targets()
-
-                if len(result.joint_trajectory.points) == 0: 
-                    print('Check enclosure failed')
-                    self.group.stop()
-
-                    print('Removing future obstacle')
-                    self.future_printing_status = False
-                    self.enclosure(point_list[0])
-                    break
-
-                else: print('Check enclosure successful')
 
             executed_waypoint_index = 0 # initial value of nothing
 
@@ -663,7 +560,6 @@ class arm_base_control:
             print('when plan success, move_group_status:', self.move_group_execution_status, 'success_plan_number:', success_num)
 
             if executing_state == 1 :
-                printing_start_time = datetime.datetime.now()
                 success_planned_waypoint_array = np.delete(np.array(point_list[:success_num]), 2, axis=1)
                 # print 'success planned waypoint\n', success_planned_waypoint_array
                 print 'status', self.waypoint_execution_status
@@ -679,20 +575,15 @@ class arm_base_control:
                         self.group.stop()
                         executing_state = 0
                         break
-                    if self.waypoint_execution_status == 3: break
-                    
+
                     current_ee_pose = self.group.get_current_pose().pose
                     current_ee_position_array = np.array([current_ee_pose.position.x,
                                                           current_ee_pose.position.y])
 
-                    executed_waypoint_index = max(self.check_executed_waypoint_index(success_planned_waypoint_array, current_ee_position_array), executed_waypoint_index)
-                    if executed_waypoint_index == previous_index: repeat_check += 1
-                    previous_index = executed_waypoint_index
-
-                    if repeat_check >= 20: break
+                    executed_waypoint_index = self.check_executed_waypoint_index(success_planned_waypoint_array, current_ee_position_array)
                     # print 'executed latest index', executed_waypoint_index
 
-                    index_check = max(self.check_executed_waypoint_index(full_point_array, current_ee_position_array), index_check)
+                    index_check = self.check_executed_waypoint_index(full_point_array, current_ee_position_array)
                     self.further_printing_number = index_check
                     print 'index:', index_check, 'way_point index', executed_waypoint_index
 
@@ -705,12 +596,6 @@ class arm_base_control:
 
                         if len(result.joint_trajectory.points) == 0: 
                             print('Check enclosure failed')
-                            self.group.stop()
-
-                            print('Removing future obstacle')
-                            self.future_printing_status = False
-                            self.enclosure(full_point_list[index_check])
-                            break
 
                         else: print('Check enclosure successful')
 
@@ -733,7 +618,7 @@ class arm_base_control:
                                                 0.00,
                                                 path_constraints = constraints)
                     print 'Dynamic check fraction:', fraction2
-                    if fraction2 < 0.95:
+                    if fraction2 < 1:
                         ## new obstacle appear
                         # print 'executed latest index', executed_waypoint_index
                         # print 'fraction value', fraction,'\n'
@@ -744,14 +629,13 @@ class arm_base_control:
                         break
 
                 rospy.sleep(2)
-                printing_end_time = datetime.datetime.now()
-                self.printing_time += (printing_end_time- printing_start_time).seconds
-                number_printing_part += 1   
+
                 print 'status:', self.waypoint_execution_status, 'executed_index:',executed_waypoint_index, 'success_num:', success_num
 
                 if self.waypoint_execution_status == 3:
                     # waypoint successfully printed
                     # self.print_list_visualize(point_list[:success_num])
+                    self.rviz_visualise_marker(point_list[:success_num])
                     del(point_list[:success_num-1])
 
                 elif self.waypoint_execution_status == 2 or 4:
@@ -759,6 +643,7 @@ class arm_base_control:
                     # only printed partial waypoint
                     # self.print_list_visualize(point_list[:executed_waypoint_index+1])
                     if executed_waypoint_index > 0: # at index 0, it might have not print the point 0-1 edge successfully.
+                        self.rviz_visualise_marker(point_list[:executed_waypoint_index+1])
                         del(point_list[:executed_waypoint_index]) # delete up till whatever is executed
 
             self.msg_print.data = False
@@ -772,35 +657,14 @@ class arm_base_control:
         self.group.set_path_constraints(None)
 
         finshtime = datetime.datetime.now()
-
-
-        print('All time:', (finshtime-startime).seconds)
-        print('Printing time:', self.printing_time)
-        print('planning time:', self.planning_time)
-        print('Travel time:', (finshtime-startime).seconds - self.printing_time - self.planning_time)
-        print('number of printing:', number_printing_part)
-
-        # Tell plot node save data
-        msg_experiment = String()
-        msg_experiment = 'Finish'
-        self.experiment.publish(msg_experiment)
-
-        # Save result to csv
-        list_result=[[(finshtime-startime).seconds, self.printing_time, self.planning_time, 
-        (finshtime-startime).seconds - self.printing_time - self.planning_time, number_printing_part]]
-
-        result_name = ['All time', 'Printing time', 'planning time', 'Travel time', 'number of printing']
-
-        result_data = pd.DataFrame(columns = result_name,data=list_result)
-
-
-        # Plot Result
+        
+        print(finshtime-startime).seconds
         full_point_list_x = [base[0] for base in full_point_list]
         full_point_list_y = [base[1] for base in full_point_list]
 
 
         plt3 = plt.figure("Printing result", figsize=(6, 6))
-        plt.plot(self.re_position_x ,self.re_position_y, 'b', linewidth = 1.2)
+        plt.plot(self.re_position_x ,self.re_position_y, 'b')
         plt.plot(full_point_list_x, full_point_list_y, 'ro')
         plt.xlim(min(full_point_list_x) - 0.1, max(full_point_list_x) + 0.1)
         plt.ylim(min(full_point_list_y) - 0.1, max(full_point_list_y) + 0.1)
@@ -809,13 +673,7 @@ class arm_base_control:
         plt.ylabel("y axis (m)")
         plt.title('Printing result')
 
-        # Save printing path
-        printing_result_list = [full_point_list_x, full_point_list_y, self.re_position_x, self.re_position_y]
-        printing_data = pd.DataFrame(data=printing_result_list)
-        # Save result plot
-        if name:
-            plt3.savefig('experiment_data/' + str(name) + '/' + str(name) + '_result.png', dpi=plt3.dpi)
-            result_data.to_csv('experiment_data/' + str(name) + '/' + str(name) +'_result.csv',encoding='gbk')
-            printing_data.to_csv('experiment_data/' + str(name) + '/' + str(name) +'_printpath.csv',encoding='gbk')
-        print('All finish')
+        plt.show()
+        plt3.savefig('result.png', dpi=plt3.dpi)
 
+        print('All finish, time:', (finshtime-startime).seconds)
