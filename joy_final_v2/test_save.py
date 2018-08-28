@@ -24,11 +24,8 @@ class general_printing_demo:
 
         rospy.init_node('general_printing')
 
-        name = ['1','2','3', '4']
 
-
-        
-        for i in name:
+        for name in range(3,8):
             control = arm_base_control()
 
             sce = moveit_python.PlanningSceneInterface('odom')
@@ -36,10 +33,9 @@ class general_printing_demo:
             rospy.sleep(5)
 
             point_list = []
-            point_list += control.straight_line_sample((0,1), (1,1))
-            # control.print_list_visualize(point_list)
+            point_list = control.straight_line_sample((-1,1), (3,1))
 
-            control.print_pointlist(point_list, name = i)
+            control.print_pointlist(point_list, name = 'experiment_dynamic_ob_v_0_1_t_95_' + str(name))
 
   
 

@@ -86,7 +86,7 @@ class save_data:
         y_max = max(max(self.eef_position_y), max(self.base_position_y))
         plt.xlim(x_min - 1, x_max + 1)
         plt.ylim(y_min - 1, y_max + 1)
-        plt.legend(['EEF Trajactory', 'Base Trajactory', 'Starting point', 'Ending point'], fontsize=12, bbox_to_anchor=(1.0, 1))
+        plt.legend(['EEF Trajactory', 'Base Trajactory', 'Starting point', 'Ending point'], fontsize=9, bbox_to_anchor=(1.0, 1))
         plt.title('Path')
         plt.xlabel("X axis (m)")
         plt.ylabel("y axis (m)")
