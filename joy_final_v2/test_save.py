@@ -25,17 +25,25 @@ class general_printing_demo:
         rospy.init_node('general_printing')
 
 
-        for name in range(3,8):
+        for name in range(1,8):
             control = arm_base_control()
 
             sce = moveit_python.PlanningSceneInterface('odom')
             sce.clear()
             rospy.sleep(5)
 
-            point_list = []
-            point_list = control.straight_line_sample((-1,1), (3,1))
 
-            control.print_pointlist(point_list, name = 'experiment_dynamic_ob_v_0_1_t_95_' + str(name))
+
+            point_list = []
+            point_list += control.straight_line_sample((0,1), (1,1))
+            point_list += control.straight_line_sample((1,1), (1,2))
+            point_list += control.straight_line_sample((1,2), (3,1))
+            point_list += control.straight_line_sample((3,1), (1,0))
+            point_list += control.straight_line_sample((1,0), (1,1))
+
+            # control.print_list_visualize(point_list)
+
+            control.print_pointlist(point_list, name = 'fuck' + str(name))
 
   
 

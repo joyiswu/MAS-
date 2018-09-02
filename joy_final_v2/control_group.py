@@ -808,6 +808,7 @@ class arm_base_control:
         plt.xlabel("X axis (m)")
         plt.ylabel("y axis (m)")
         plt.title('Printing result')
+        plt.show()
 
         # Save printing path
         printing_result_list = [full_point_list_x, full_point_list_y, self.re_position_x, self.re_position_y]
